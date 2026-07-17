@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.templar/schemas/pcap-security-candidate-result.v1.json",
+  "title": "PCAP security triage candidate result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "summary",
+    "assessment",
+    "observation_ids",
+    "hypotheses",
+    "unknown_ids",
+    "advisory_action_ids",
+    "checks_performed",
+    "promotion",
+    "external_mutations"
+  ],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "status": { "enum": ["completed", "needs_review"] },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "assessment": {
+      "enum": ["suspicious_needs_review", "inconclusive", "no_supported_security_conclusion"]
+    },
+    "observation_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "hypotheses": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hypothesis_id",
+          "statement",
+          "confidence",
+          "observation_ids",
+          "principle_ids",
+          "alternatives",
+          "unknown_ids",
+          "kill_chain_stage"
+        ],
+        "properties": {
+          "hypothesis_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "statement": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "confidence": { "enum": ["low", "moderate"] },
+          "observation_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string" }
+          },
+          "principle_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string" }
+          },
+          "alternatives": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+          },
+          "unknown_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string" }
+          },
+          "kill_chain_stage": {
+            "type": ["string", "null"],
+            "enum": ["delivery", "command_and_control", "actions_on_objectives", null]
+          }
+        }
+      }
+    },
+    "unknown_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "advisory_action_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "checks_performed": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["impact", "security_outcome", "headline_result"],
+      "properties": {
+        "impact": { "enum": ["routine", "high"] },
+        "security_outcome": { "const": true },
+        "headline_result": { "const": false }
+      }
+    },
+    "external_mutations": { "type": "array", "maxItems": 0 }
+  }
+}

@@ -33,10 +33,21 @@ interface FakeEvaluationContext {
   readonly available_checks: ReadonlyArray<string>;
 }
 
+interface FakePcapSecurityContext {
+  readonly required_observation_ids: ReadonlyArray<string>;
+  readonly known_principle_ids: ReadonlyArray<string>;
+  readonly required_unknown_ids: ReadonlyArray<string>;
+  readonly allowed_actions: ReadonlyArray<{
+    readonly action_id: string;
+    readonly ordinal: number;
+  }>;
+  readonly available_checks: ReadonlyArray<string>;
+}
+
 const agentReport = JSON.stringify({
   status: "completed",
   summary: "Completed the assigned bounded phase.",
-  evidence: ["Used only the immutable incident workspace."],
+  evidence: ["Used only the immutable local case workspace."],
   risks: [],
   nextSteps: [],
 });
@@ -135,6 +146,81 @@ async function writeCandidate(input: RuntimeTurnInput, completeCoverage: boolean
   }
 }
 
+async function writeSecurityCandidate(
+  input: RuntimeTurnInput,
+  completeCoverage: boolean,
+): Promise<void> {
+  const context = JSON.parse(
+    await readFile(path.join(input.cwd, "evaluation", "context.json"), "utf8"),
+  ) as FakePcapSecurityContext;
+  const observationIds = completeCoverage
+    ? context.required_observation_ids
+    : context.required_observation_ids.slice(
+        0,
+        Math.max(1, context.required_observation_ids.length - 1),
+      );
+  const unknownIds = completeCoverage
+    ? context.required_unknown_ids
+    : context.required_unknown_ids.slice(0, Math.max(1, context.required_unknown_ids.length - 1));
+  const actionIds = context.allowed_actions
+    .filter((_action, index, all) => completeCoverage || index < all.length - 1)
+    .map((action) => action.action_id);
+  const output = {
+    schema_version: "1",
+    status: "needs_review",
+    summary:
+      "The packet observations warrant passive review; endpoint, identity, asset, and baseline context remain unavailable.",
+    assessment: "suspicious_needs_review",
+    observation_ids: observationIds,
+    hypotheses: [
+      {
+        hypothesis_id: "hypothesis.automated_or_unexpected_network_activity",
+        statement:
+          "The observed traffic pattern may represent automated or unexpected activity that needs host and network correlation.",
+        confidence: "low",
+        observation_ids: observationIds.slice(0, Math.min(3, observationIds.length)),
+        principle_ids: context.known_principle_ids.slice(0, 3),
+        alternatives: ["approved remote administration", "monitoring or update traffic"],
+        unknown_ids: unknownIds,
+        kill_chain_stage: null,
+      },
+    ],
+    unknown_ids: unknownIds,
+    advisory_action_ids: actionIds,
+    checks_performed: context.available_checks,
+    promotion: {
+      impact: "routine",
+      security_outcome: true,
+      headline_result: false,
+    },
+    external_mutations: [],
+  };
+  await writeFile(
+    path.join(input.cwd, "result.json"),
+    `${JSON.stringify(output, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(input.cwd, "report.md"),
+    `# Observed facts\n\nThe bounded observation IDs are listed in result.json.\n\n# Hypotheses\n\nThe traffic may be automated or unexpected; approved administration and routine service activity remain plausible alternatives.\n\n# Defensive next steps\n\nPreserve the capture and correlate it with authorized asset, endpoint, identity, and baseline evidence. No external mutation was performed.\n`,
+    "utf8",
+  );
+}
+
+async function workflowId(cwd: string): Promise<string> {
+  const parsed = JSON.parse(await readFile(path.join(cwd, "workflow.json"), "utf8")) as unknown;
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    !("workflow_id" in parsed) ||
+    typeof parsed.workflow_id !== "string"
+  ) {
+    throw new Error("Fake runtime could not resolve the workflow ID.");
+  }
+  return parsed.workflow_id;
+}
+
 async function auditCandidate(input: RuntimeTurnInput): Promise<string> {
   const tracePath = path.join(input.cwd, ".harness-audit", "trace.jsonl");
   const traceAvailable = await access(tracePath).then(
@@ -222,9 +308,16 @@ export class ScriptedTemplarRuntime implements AgentRuntime {
   readonly runTurn = (input: RuntimeTurnInput) =>
     Effect.tryPromise({
       try: async () => {
+        const workflow = await workflowId(input.cwd);
         if (input.agentId !== "supervisor") {
-          if (input.agentId === "candidate_a") await writeCandidate(input, true);
-          if (input.agentId === "candidate_b") await writeCandidate(input, false);
+          if (input.agentId === "candidate_a") {
+            if (workflow === "pcap_security_triage") await writeSecurityCandidate(input, true);
+            else await writeCandidate(input, true);
+          }
+          if (input.agentId === "candidate_b") {
+            if (workflow === "pcap_security_triage") await writeSecurityCandidate(input, false);
+            else await writeCandidate(input, false);
+          }
           const finalText = input.agentId.startsWith("audit_")
             ? await auditCandidate(input)
             : agentReport;
@@ -232,6 +325,59 @@ export class ScriptedTemplarRuntime implements AgentRuntime {
         }
 
         this.#supervisorTurns += 1;
+        if (workflow === "pcap_security_triage") {
+          if (this.#supervisorTurns === 1) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Run the passive packet-evidence research phase.",
+                assignments: [
+                  {
+                    agentId: "research_once",
+                    roleId: "security_evidence_researcher",
+                    task: "Identify relevant packet observations, alternatives, and missing context.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 2) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Create two independent passive security triage candidates.",
+                assignments: [
+                  {
+                    agentId: "candidate_a",
+                    roleId: "security_analyst",
+                    task: "Write a fact-grounded triage with alternatives and defensive next steps.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "candidate_b",
+                    roleId: "security_analyst",
+                    task: "Independently triage the bounded facts and make uncertainty explicit.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          return result(
+            "supervisor-thread",
+            JSON.stringify({
+              status: "accept",
+              summary: "Accept the highest-scoring fact-grounded triage.",
+              assignments: [],
+              selectedCandidateId: "candidate_b",
+            }),
+          );
+        }
         if (this.#supervisorTurns === 1) {
           return result(
             "supervisor-thread",

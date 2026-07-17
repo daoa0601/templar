@@ -22,10 +22,23 @@ const IncidentInputSchema = Schema.Struct({
   pcap_artifact_id: Schema.optionalKey(Schema.String),
 });
 
+const PcapSecurityTriageInputSchema = Schema.Struct({
+  schema_version: Schema.Literal("1"),
+  pcap_artifact_id: Schema.String,
+});
+
 const decodeIncidentShape = SchemaParser.decodeUnknownSync(IncidentInputSchema, {
   errors: "all",
   onExcessProperty: "error",
 });
+
+const decodePcapSecurityTriageShape = SchemaParser.decodeUnknownSync(
+  PcapSecurityTriageInputSchema,
+  {
+    errors: "all",
+    onExcessProperty: "error",
+  },
+);
 
 export interface StructuredObservation {
   readonly observation_id: string;
@@ -41,6 +54,11 @@ export interface IncidentInput {
   readonly ticket_ref?: string;
   readonly reported_priority?: string;
   readonly pcap_artifact_id?: string;
+}
+
+export interface PcapSecurityTriageInput {
+  readonly schema_version: "1";
+  readonly pcap_artifact_id: string;
 }
 
 const SAFE_ID = /^[a-z][a-z0-9_.-]{0,63}$/u;
@@ -152,4 +170,17 @@ export function decodeIncidentInput(value: unknown): IncidentInput {
 
 export function isPcapArtifactId(value: string): boolean {
   return ARTIFACT_ID.test(value);
+}
+
+export function decodePcapSecurityTriageInput(value: unknown): PcapSecurityTriageInput {
+  let input: typeof PcapSecurityTriageInputSchema.Type;
+  try {
+    input = decodePcapSecurityTriageShape(value);
+  } catch (cause) {
+    throw invalidInput("PcapSecurityTriageInput v1 does not match the strict schema.", cause);
+  }
+  if (!ARTIFACT_ID.test(input.pcap_artifact_id)) {
+    throw invalidInput("pcap_artifact_id must be a content-addressed PCAP artifact ID.");
+  }
+  return input;
 }

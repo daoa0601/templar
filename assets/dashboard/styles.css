@@ -68,11 +68,13 @@ label {
 }
 input,
 textarea,
+select,
 button {
   font: inherit;
 }
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   background: #090b0a;
   color: var(--ink);

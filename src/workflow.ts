@@ -1,6 +1,6 @@
 import type { WorkflowDefinition } from "aiur-orchestrator";
 
-import type { TelecomIncidentWorkspace } from "./workspace.js";
+import type { PcapSecurityTriageWorkspace, TelecomIncidentWorkspace } from "./workspace.js";
 
 export const TELECOM_WORKFLOW_LIMITS = {
   maxRounds: 4,
@@ -13,6 +13,16 @@ export const TELECOM_WORKFLOW_LIMITS = {
   // four-round workflow needs headroom for nine schema-constrained turns while
   // per-turn and wall-clock limits separately bound cached tool loops.
   maxTotalTokens: 500_000,
+} as const;
+
+export const PCAP_SECURITY_TRIAGE_WORKFLOW_LIMITS = {
+  maxRounds: 3,
+  maxConcurrentAgents: 2,
+  maxTotalAgents: 3,
+  maxTotalAgentTurns: 3,
+  maxWallClockSeconds: 300,
+  turnTimeoutSeconds: 120,
+  maxTotalTokens: 300_000,
 } as const;
 
 export function telecomIncidentWorkflow(incident: TelecomIncidentWorkspace): WorkflowDefinition {
@@ -88,6 +98,64 @@ or broaden scope.`,
     limits: TELECOM_WORKFLOW_LIMITS,
     evaluation: {
       command: ["node", incident.evaluatorPath],
+      timeoutSeconds: 20,
+    },
+    codex: {
+      binary: "codex",
+      ignoreUserConfig: true,
+      maxOutputBytes: 2 * 1024 * 1024,
+    },
+  };
+}
+
+export function pcapSecurityTriageWorkflow(
+  triage: PcapSecurityTriageWorkspace,
+): WorkflowDefinition {
+  return {
+    version: 1,
+    name: "pcap_security_triage",
+    objective:
+      "Produce a passive security triage report from bounded local PCAP facts without claiming unsupported compromise or attribution.",
+    configPath: `${triage.root}/workflow.json`,
+    workspace: triage.root,
+    allowDirtyWorkspace: false,
+    supervisor: {
+      model: undefined,
+      instructions: `Use this exact bounded sequence and no other sequence:
+Round 1: assign research_once to role security_evidence_researcher. It identifies the most relevant
+packet observations, uncertainty, plausible alternatives, and applicable playbook principles only.
+Round 2: after research completes, assign candidate_a and candidate_b together to role
+security_analyst. Include the researcher's relevant observation IDs and gaps in both tasks. The two
+analysts remain independent and each writes only result.json and report.md.
+Round 3: accept the highest scoring evaluator-passing candidate. Break an exact score tie by
+candidate ordinal (candidate_a before candidate_b). If neither passes, stop. Never add a reviewer
+round, skip the research phase, dispatch an undeclared agent, change scope, or ask for more turns.`,
+    },
+    roles: [
+      {
+        id: "security_evidence_researcher",
+        kind: "research",
+        description: "Read-only prioritization of packet facts, alternatives, and missing context.",
+        instructions:
+          "Read evidence.json, triage-playbook.json, and evaluation/context.json. Identify important observation IDs, plausible benign alternatives, and missing endpoint, identity, asset, baseline, and capture context. Do not edit, use network, claim compromise, or spawn agents.",
+        maxInstances: 1,
+        maxTurns: 1,
+        model: undefined,
+      },
+      {
+        id: "security_analyst",
+        kind: "candidate",
+        description: "Independent passive PCAP security triage analyst.",
+        instructions:
+          "Follow CANDIDATE_INSTRUCTIONS.md. Write result.json and report.md only. Ground hypotheses in known observation and principle IDs, name alternatives and unknowns, choose only declared passive actions, and never use network or mutate external systems.",
+        maxInstances: 2,
+        maxTurns: 1,
+        model: undefined,
+      },
+    ],
+    limits: PCAP_SECURITY_TRIAGE_WORKFLOW_LIMITS,
+    evaluation: {
+      command: ["node", triage.evaluatorPath],
       timeoutSeconds: 20,
     },
     codex: {

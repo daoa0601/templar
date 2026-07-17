@@ -67,6 +67,11 @@ const TELECOM_INCIDENT_BUDGET: WorkflowBudgets = {
   maxTokens: 500_000,
 };
 
+const PCAP_SECURITY_TRIAGE_BUDGET: WorkflowBudgets = {
+  ...PASSIVE_BUDGET,
+  maxTokens: 300_000,
+};
+
 const STATIC_BUDGET: WorkflowBudgets = {
   wallClockSeconds: 600,
   maxTurns: 4,
@@ -130,6 +135,25 @@ export const WORKFLOW_CATALOG: ReadonlyArray<WorkflowCatalogEntry> = [
     budgets: TELECOM_INCIDENT_BUDGET,
     evaluatorRequired: true,
     traceAuditorRequired: true,
+    persistencePolicy: "bounded_case_record",
+    dataSensitivityPolicy: "operational",
+    releaseState: "enabled",
+  }),
+  entry({
+    id: "pcap_security_triage",
+    version: "1.0.0",
+    family: "blue_team",
+    description: "Passive security triage of one locally staged classic PCAP.",
+    inputSchemaId: "templar://pcap_security_triage/PcapSecurityTriageInput/v1",
+    outputSchemaId: "templar://pcap_security_triage/PcapSecurityTriageResult/v1",
+    requiredCapability: "PASSIVE_READ",
+    authorizationCheckpoint: "local_capture_scope",
+    networkMode: "denied",
+    filesystemMode: "isolated_candidate_worktree",
+    toolAllowlist: ["analyze_classic_pcap"],
+    budgets: PCAP_SECURITY_TRIAGE_BUDGET,
+    evaluatorRequired: true,
+    traceAuditorRequired: false,
     persistencePolicy: "bounded_case_record",
     dataSensitivityPolicy: "operational",
     releaseState: "enabled",

@@ -123,4 +123,28 @@ describe("structured evaluation audit projection", () => {
       disposition: "manual_review",
     });
   });
+
+  it("projects evaluator-only workflows without inventing a missing-auditor failure", () => {
+    expect(
+      projectEvaluationAudit(
+        auditRecords().slice(1, 2),
+        "candidate_a",
+        {},
+        {
+          traceAuditorRequired: false,
+        },
+      ),
+    ).toEqual({
+      checksRerun: ["deterministic_evaluator"],
+      suspiciousBehavior: [],
+      findings: [],
+      disposition: "pass",
+      manualAuditRequired: false,
+      candidateSelfAudit: undefined,
+      auditorCount: 0,
+      traceInspected: false,
+      traceComplete: false,
+      harnessEvaluator: { passed: true, exitCode: 0, durationMs: 5 },
+    });
+  });
 });

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { WORKFLOW_CATALOG } from "./catalog.js";
 import type { TemplarConfig } from "./config.js";
-import { decodeIncidentInput } from "./contracts.js";
+import { decodeIncidentInput, decodePcapSecurityTriageInput } from "./contracts.js";
 import { redactedError, TemplarError } from "./errors.js";
 import type { TemplarService } from "./service.js";
 
@@ -57,6 +57,28 @@ async function body(request: http.IncomingMessage, limit: number): Promise<Buffe
     chunks.push(chunk);
   }
   return Buffer.concat(chunks, total);
+}
+
+async function jsonBody(request: http.IncomingMessage, limit: number): Promise<unknown> {
+  const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+  if (contentType !== "application/json") {
+    throw new TemplarError({
+      code: "INVALID_INPUT",
+      message: "Run body must be JSON.",
+      status: 415,
+    });
+  }
+  try {
+    return JSON.parse((await body(request, limit)).toString("utf8")) as unknown;
+  } catch (cause) {
+    if (cause instanceof TemplarError) throw cause;
+    throw new TemplarError({
+      code: "INVALID_INPUT",
+      message: "Run body is not valid JSON.",
+      status: 400,
+      cause,
+    });
+  }
 }
 
 function numericCursor(value: string | null): number {
@@ -149,30 +171,25 @@ async function handle(
       await service.stagePcap(await body(request, service.config.maxPcapBytes)),
     );
   }
-  if (method === "POST" && url.pathname === "/api/incidents") {
-    const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
-    if (contentType !== "application/json")
-      throw new TemplarError({
-        code: "INVALID_INPUT",
-        message: "Incident body must be JSON.",
-        status: 415,
-      });
-    const encoded = await body(request, service.config.maxJsonBytes);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(encoded.toString("utf8"));
-    } catch (cause) {
-      throw new TemplarError({
-        code: "INVALID_INPUT",
-        message: "Incident body is not valid JSON.",
-        status: 400,
-        cause,
-      });
-    }
+  if (
+    method === "POST" &&
+    (url.pathname === "/api/incidents" || url.pathname === "/api/workflows/telecom_incident/runs")
+  ) {
     return sendJson(
       response,
       202,
-      await service.submitTelecomIncident(decodeIncidentInput(parsed)),
+      await service.submitTelecomIncident(
+        decodeIncidentInput(await jsonBody(request, service.config.maxJsonBytes)),
+      ),
+    );
+  }
+  if (method === "POST" && url.pathname === "/api/workflows/pcap_security_triage/runs") {
+    return sendJson(
+      response,
+      202,
+      await service.submitPcapSecurityTriage(
+        decodePcapSecurityTriageInput(await jsonBody(request, service.config.maxJsonBytes)),
+      ),
     );
   }
   if (method === "GET" && url.pathname === "/api/runs")

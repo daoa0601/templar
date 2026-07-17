@@ -1,7 +1,11 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { analyzeClassicPcapFile } from "../../dist/pcap-analyzer.js";
+import { loadConfig } from "../../dist/config.js";
+import { decodePcapSecurityTriageInput } from "../../dist/contracts.js";
+import { ScriptedTemplarRuntime } from "../../dist/fake-runtime.js";
+import { TemplarService } from "../../dist/service.js";
 
 const captures = [
   {
@@ -54,11 +58,22 @@ function topFactValues(analysis, factId, limit) {
   return value.slice(0, limit);
 }
 
+async function waitForTerminal(service, runId) {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const run = await service.inspectRun(runId);
+    if (run.status !== "queued" && run.status !== "running") return run;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("CTU-13 harness smoke run did not finish.");
+}
+
 await mkdir(dataDirectory, { recursive: true });
 
 const results = [];
+const capturePaths = new Map();
 for (const capture of captures) {
   const filePath = await capturePath(capture);
+  capturePaths.set(capture.id, filePath);
   const analysis = await analyzeClassicPcapFile(filePath, `smoke:${capture.id}`, {
     maxBytes: 8 * 1024 * 1024,
     maxPackets: 30_000,
@@ -79,4 +94,39 @@ for (const capture of captures) {
   });
 }
 
-process.stdout.write(`${JSON.stringify({ cases: results }, null, 2)}\n`);
+let harness;
+if (process.argv.includes("--harness")) {
+  const donbotPath = capturePaths.get("donbot");
+  if (donbotPath === undefined) throw new Error("DonBot smoke capture is unavailable.");
+  const config = loadConfig({
+    TEMPLAR_HOME: path.join(dataDirectory, "runtime"),
+    TEMPLAR_MAX_PCAP_PACKETS: "30000",
+  });
+  const service = new TemplarService(config, {
+    runtimeFactory: () => new ScriptedTemplarRuntime(),
+  });
+  await service.initialize();
+  const artifact = await service.stagePcap(await readFile(donbotPath));
+  const submitted = await service.submitPcapSecurityTriage(
+    decodePcapSecurityTriageInput({
+      schema_version: "1",
+      pcap_artifact_id: artifact.artifact_id,
+    }),
+  );
+  const run = await waitForTerminal(service, submitted.run_id);
+  const output = run.status === "accepted" ? await service.result(submitted.run_id) : undefined;
+  harness = {
+    run_id: submitted.run_id,
+    status: run.status,
+    rounds: run.rounds,
+    agent_turns: run.agentTurns,
+    selected_candidate_id: run.selectedCandidateId ?? null,
+    result: output?.result ?? null,
+    evaluation: output?.evaluation ?? null,
+    promotion: output?.promotion ?? null,
+  };
+}
+
+process.stdout.write(
+  `${JSON.stringify({ cases: results, ...(harness === undefined ? {} : { harness }) }, null, 2)}\n`,
+);

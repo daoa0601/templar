@@ -16,19 +16,23 @@ import type {
   PublicRunEvent,
   PublicRunView,
   RunEventRecord,
+  WorkflowDefinition,
 } from "aiur-orchestrator";
 import { Effect, Fiber } from "effect";
 import type { Fiber as EffectFiber } from "effect/Fiber";
 
 import type { TemplarConfig } from "./config.js";
-import { requiresHumanAcknowledgment } from "./catalog.js";
-import type { IncidentInput } from "./contracts.js";
+import { requiresHumanAcknowledgment, workflowEntry } from "./catalog.js";
+import type { IncidentInput, PcapSecurityTriageInput } from "./contracts.js";
 import { TemplarError } from "./errors.js";
 import { analyzeClassicPcapFile } from "./pcap-analyzer.js";
 import { PcapArtifactStore } from "./pcap-store.js";
 import type { StoredPcapArtifact } from "./pcap-store.js";
-import { telecomIncidentWorkflow } from "./workflow.js";
-import { initializeTelecomIncidentWorkspace } from "./workspace.js";
+import { pcapSecurityTriageWorkflow, telecomIncidentWorkflow } from "./workflow.js";
+import {
+  initializePcapSecurityTriageWorkspace,
+  initializeTelecomIncidentWorkspace,
+} from "./workspace.js";
 import { DeterministicSelectionRuntime } from "./selection-guard.js";
 
 type RunFiber = EffectFiber<unknown, unknown>;
@@ -42,8 +46,23 @@ export interface RunResultView {
   readonly run: PublicRunView;
   readonly result: unknown;
   readonly report: string;
-  readonly evaluationAudit: EvaluationAuditView;
+  readonly evaluation: EvaluationView;
   readonly promotion: PromotionView;
+}
+
+export interface EvaluationView {
+  readonly strategy: "deterministic_evaluator" | "deterministic_evaluator_with_review";
+  readonly passed: boolean;
+  readonly manualReviewRequired: boolean;
+  readonly findings: ReadonlyArray<string>;
+  readonly evaluator: EvaluationAuditView["harnessEvaluator"];
+  readonly review: {
+    readonly checksRerun: ReadonlyArray<string>;
+    readonly suspiciousBehavior: ReadonlyArray<string>;
+    readonly auditorCount: number;
+    readonly traceInspected: boolean;
+    readonly traceComplete: boolean;
+  } | null;
 }
 
 export interface EvaluationAuditView {
@@ -73,13 +92,16 @@ export interface PromotionView {
 export class TemplarService {
   readonly config: TemplarConfig;
   readonly artifacts: PcapArtifactStore;
-  readonly #runtimeFactory: ((runId: string) => AgentRuntime | undefined) | undefined;
+  readonly #runtimeFactory:
+    ((runId: string, workflowId: string) => AgentRuntime | undefined) | undefined;
   readonly #active = new Map<string, RunFiber>();
   #reservedSlots = 0;
 
   constructor(
     config: TemplarConfig,
-    options: { readonly runtimeFactory?: (runId: string) => AgentRuntime | undefined } = {},
+    options: {
+      readonly runtimeFactory?: (runId: string, workflowId: string) => AgentRuntime | undefined;
+    } = {},
   ) {
     this.config = config;
     this.artifacts = new PcapArtifactStore(config.artifactRoot, config.maxPcapBytes);
@@ -101,17 +123,7 @@ export class TemplarService {
   }
 
   async submitTelecomIncident(incident: IncidentInput): Promise<SubmitResult> {
-    if (this.#reservedSlots >= this.config.maxActiveRuns) {
-      throw new TemplarError({
-        code: "SERVICE_UNAVAILABLE",
-        message: "The active run limit has been reached.",
-        status: 503,
-      });
-    }
-    this.#reservedSlots += 1;
-    let started = false;
-    try {
-      const runId = createRunId();
+    return this.#submit(async (runId) => {
       const pcap =
         incident.pcap_artifact_id === undefined
           ? undefined
@@ -126,10 +138,51 @@ export class TemplarService {
         incident,
         ...(pcap === undefined ? {} : { pcap }),
       });
-      const workflow = telecomIncidentWorkflow(workspace);
-      const suppliedRuntime = this.#runtimeFactory?.(runId);
+      return { workflow: telecomIncidentWorkflow(workspace), requirePinnedAuditors: true };
+    });
+  }
+
+  async submitPcapSecurityTriage(input: PcapSecurityTriageInput): Promise<SubmitResult> {
+    return this.#submit(async (runId) => {
+      const pcap = await analyzeClassicPcapFile(
+        await this.artifacts.resolve(input.pcap_artifact_id),
+        input.pcap_artifact_id,
+        { maxBytes: this.config.maxPcapBytes, maxPackets: this.config.maxPcapPackets },
+      );
+      const workspace = await initializePcapSecurityTriageWorkspace({
+        templarHome: this.config.templarHome,
+        runId,
+        pcap,
+      });
+      return {
+        workflow: pcapSecurityTriageWorkflow(workspace),
+        requirePinnedAuditors: false,
+      };
+    });
+  }
+
+  async #submit(
+    prepare: (runId: string) => Promise<{
+      readonly workflow: WorkflowDefinition;
+      readonly requirePinnedAuditors: boolean;
+    }>,
+  ): Promise<SubmitResult> {
+    if (this.#reservedSlots >= this.config.maxActiveRuns) {
+      throw new TemplarError({
+        code: "SERVICE_UNAVAILABLE",
+        message: "The active run limit has been reached.",
+        status: 503,
+      });
+    }
+    this.#reservedSlots += 1;
+    let started = false;
+    try {
+      const runId = createRunId();
+      const { workflow, requirePinnedAuditors } = await prepare(runId);
+      const suppliedRuntime = this.#runtimeFactory?.(runId, workflow.name);
       const runtime = new DeterministicSelectionRuntime(
         suppliedRuntime ?? makeCodexRuntime(workflow.codex),
+        { requirePinnedAuditors },
       );
       const orchestration = runOrchestration({
         workflow,
@@ -211,17 +264,20 @@ export class TemplarService {
         Effect.runPromise(readRunEventRecords(this.config.harnessHome, runId)),
       ]);
       const result = JSON.parse(resultText) as unknown;
+      if (run.workflow === undefined) throw new Error("Accepted run is missing its workflow ID.");
+      const catalogEntry = workflowEntry(run.workflow);
       const evaluationAudit = projectEvaluationAudit(
         privateRecords,
         run.selectedCandidateId,
         result,
+        { traceAuditorRequired: catalogEntry.traceAuditorRequired },
       );
       const resultRecord = record(result);
       const severity =
         typeof resultRecord?.severity === "string" ? resultRecord.severity : undefined;
       const promotionRecord = record(resultRecord?.promotion);
       const reasons = requiresHumanAcknowledgment({
-        family: "network_analysis",
+        family: catalogEntry.family,
         ...(severity === undefined ? {} : { severity }),
         highImpact: promotionRecord?.impact === "high",
         securityOutcome: promotionRecord?.security_outcome === true,
@@ -229,11 +285,30 @@ export class TemplarService {
         manualAuditRequired: evaluationAudit.manualAuditRequired,
       });
       const acknowledged = await this.#isAcknowledged(runId);
+      const evaluation: EvaluationView = {
+        strategy: catalogEntry.traceAuditorRequired
+          ? "deterministic_evaluator_with_review"
+          : "deterministic_evaluator",
+        passed:
+          evaluationAudit.harnessEvaluator?.passed === true && !evaluationAudit.manualAuditRequired,
+        manualReviewRequired: evaluationAudit.manualAuditRequired,
+        findings: evaluationAudit.findings,
+        evaluator: evaluationAudit.harnessEvaluator,
+        review: catalogEntry.traceAuditorRequired
+          ? {
+              checksRerun: evaluationAudit.checksRerun,
+              suspiciousBehavior: evaluationAudit.suspiciousBehavior,
+              auditorCount: evaluationAudit.auditorCount,
+              traceInspected: evaluationAudit.traceInspected,
+              traceComplete: evaluationAudit.traceComplete,
+            }
+          : null,
+      };
       return {
         run,
         result,
         report,
-        evaluationAudit,
+        evaluation,
         promotion: {
           requiresHumanAcknowledgment: reasons.length > 0,
           reasons,
@@ -396,10 +471,15 @@ function marker(value: string, prefix: string): string | undefined {
   return value.startsWith(prefix) ? value.slice(prefix.length).trim() : undefined;
 }
 
+export interface EvaluationProjectionOptions {
+  readonly traceAuditorRequired?: boolean;
+}
+
 export function projectEvaluationAudit(
   events: ReadonlyArray<RunEventRecord>,
   selectedCandidateId: string | undefined,
   candidateResult: unknown,
+  options: EvaluationProjectionOptions = {},
 ): EvaluationAuditView {
   const checks: Array<string> = [];
   const suspicious: Array<string> = [];
@@ -409,6 +489,33 @@ export function projectEvaluationAudit(
   let traceInspected = false;
   let traceComplete = false;
   let harnessEvaluator: EvaluationAuditView["harnessEvaluator"] = null;
+  for (const event of events) {
+    if (event.type !== "candidate.snapshot" || event.candidateId !== selectedCandidateId) continue;
+    const evaluation = record(event.evaluation);
+    if (evaluation === undefined || typeof evaluation.passed !== "boolean") continue;
+    harnessEvaluator = {
+      passed: evaluation.passed,
+      ...(typeof evaluation.exitCode === "number" ? { exitCode: evaluation.exitCode } : {}),
+      ...(typeof evaluation.durationMs === "number" ? { durationMs: evaluation.durationMs } : {}),
+    };
+  }
+  if (options.traceAuditorRequired === false) {
+    const evaluatorPassed = harnessEvaluator?.passed === true;
+    return {
+      checksRerun: evaluatorPassed ? ["deterministic_evaluator"] : [],
+      suspiciousBehavior: [],
+      findings: evaluatorPassed
+        ? []
+        : ["The selected candidate has no persisted passing harness evaluation."],
+      disposition: evaluatorPassed ? "pass" : "manual_review",
+      manualAuditRequired: !evaluatorPassed,
+      candidateSelfAudit: undefined,
+      auditorCount: 0,
+      traceInspected: false,
+      traceComplete: false,
+      harnessEvaluator,
+    };
+  }
   const traceRecords = events.filter(
     (event) =>
       event.type === "harness.private.audit_materialized" &&
@@ -426,16 +533,6 @@ export function projectEvaluationAudit(
     );
   } else {
     traceComplete = true;
-  }
-  for (const event of events) {
-    if (event.type !== "candidate.snapshot" || event.candidateId !== selectedCandidateId) continue;
-    const evaluation = record(event.evaluation);
-    if (evaluation === undefined || typeof evaluation.passed !== "boolean") continue;
-    harnessEvaluator = {
-      passed: evaluation.passed,
-      ...(typeof evaluation.exitCode === "number" ? { exitCode: evaluation.exitCode } : {}),
-      ...(typeof evaluation.durationMs === "number" ? { durationMs: evaluation.durationMs } : {}),
-    };
   }
   for (const event of events) {
     if (

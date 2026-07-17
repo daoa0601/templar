@@ -1,5 +1,6 @@
 const state = { selected: null, after: 0, timer: null };
 const token = document.querySelector("#token");
+const workflow = document.querySelector("#workflow");
 token.value = sessionStorage.getItem("templar-token") ?? "";
 token.addEventListener("input", () => sessionStorage.setItem("templar-token", token.value));
 
@@ -70,11 +71,11 @@ async function refreshDetail() {
   if (run.status === "accepted" && run.applied) {
     const output = await api(`/api/runs/${encodeURIComponent(state.selected)}/result`);
     const promotion = output.promotion;
-    const audit = output.evaluationAudit;
+    const evaluation = output.evaluation;
     document.querySelector("#acknowledge").hidden =
       !promotion.requiresHumanAcknowledgment || promotion.acknowledged;
     document.querySelector("#final-output").innerHTML =
-      `<h3>Accepted result</h3><pre>${escapeHtml(JSON.stringify(output.result, null, 2))}</pre><h3>Audit findings</h3><pre>${escapeHtml(JSON.stringify(audit, null, 2))}</pre><h3>Promotion gate</h3><pre>${escapeHtml(JSON.stringify(promotion, null, 2))}</pre><h3>Report</h3><pre>${escapeHtml(output.report)}</pre>`;
+      `<h3>Accepted result</h3><pre>${escapeHtml(JSON.stringify(output.result, null, 2))}</pre><h3>Evaluation</h3><pre>${escapeHtml(JSON.stringify(evaluation, null, 2))}</pre><h3>Promotion gate</h3><pre>${escapeHtml(JSON.stringify(promotion, null, 2))}</pre><h3>Report</h3><pre>${escapeHtml(output.report)}</pre>`;
   } else {
     document.querySelector("#acknowledge").hidden = true;
   }
@@ -86,6 +87,8 @@ document.querySelector("#incident-form").addEventListener("submit", async (event
   status.textContent = "Starting…";
   try {
     const file = document.querySelector("#pcap").files[0];
+    const securityTriage = workflow.value === "pcap_security_triage";
+    if (securityTriage && !file) throw new Error("PCAP security triage requires a capture.");
     let artifact;
     if (file)
       artifact = await api("/api/artifacts/pcap", {
@@ -93,11 +96,15 @@ document.querySelector("#incident-form").addEventListener("submit", async (event
         headers: { "Content-Type": "application/vnd.tcpdump.pcap" },
         body: file,
       });
-    const body = { schema_version: "1", request: document.querySelector("#request").value };
-    const ticket = document.querySelector("#ticket").value.trim();
-    if (ticket) body.ticket_ref = ticket;
-    if (artifact) body.pcap_artifact_id = artifact.artifact_id;
-    const submitted = await api("/api/incidents", {
+    const body = securityTriage
+      ? { schema_version: "1", pcap_artifact_id: artifact.artifact_id }
+      : { schema_version: "1", request: document.querySelector("#request").value };
+    if (!securityTriage) {
+      const ticket = document.querySelector("#ticket").value.trim();
+      if (ticket) body.ticket_ref = ticket;
+      if (artifact) body.pcap_artifact_id = artifact.artifact_id;
+    }
+    const submitted = await api(`/api/workflows/${workflow.value}/runs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -108,6 +115,15 @@ document.querySelector("#incident-form").addEventListener("submit", async (event
   } catch (error) {
     status.textContent = error.message;
   }
+});
+workflow.addEventListener("change", () => {
+  const securityTriage = workflow.value === "pcap_security_triage";
+  document.querySelector("#request").disabled = securityTriage;
+  document.querySelector("#request").required = !securityTriage;
+  document.querySelector("#ticket-field").hidden = securityTriage;
+  document.querySelector("#workflow-description").textContent = securityTriage
+    ? "Passively triage one locally staged classic PCAP through scoped Aiur agents."
+    : "Investigate a bounded telecom incident.";
 });
 document
   .querySelector("#refresh")
@@ -120,9 +136,7 @@ document.querySelector("#cancel").addEventListener("click", async () => {
 });
 document.querySelector("#acknowledge").addEventListener("click", async () => {
   if (!state.selected) return;
-  const rationale = window.prompt(
-    "Why is this high-impact or manually audited result safe to promote?",
-  );
+  const rationale = window.prompt("Why should this gated result be promoted?");
   if (rationale) {
     await api(`/api/runs/${encodeURIComponent(state.selected)}/acknowledge`, {
       method: "POST",

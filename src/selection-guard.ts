@@ -35,6 +35,10 @@ export interface DeterministicSelection {
   }>;
 }
 
+export interface DeterministicSelectionOptions {
+  readonly requirePinnedAuditors?: boolean;
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -101,7 +105,11 @@ function hasPinnedAuditor(
  * Replays only trusted harness prompt projections: independent evaluator results and pinned review
  * observations. Model prose never contributes to the score or tie-break.
  */
-export function deterministicSelectionFromSupervisorPrompt(prompt: string): DeterministicSelection {
+export function deterministicSelectionFromSupervisorPrompt(
+  prompt: string,
+  options: DeterministicSelectionOptions = {},
+): DeterministicSelection {
+  const requirePinnedAuditors = options.requirePinnedAuditors ?? true;
   const rawCandidates = jsonSection(
     prompt,
     "Current candidate snapshots. Full patches are durable artifacts; reviewers can inspect a chosen\ncandidate directly when assigned with targetCandidateId:\n",
@@ -130,7 +138,7 @@ export function deterministicSelectionFromSupervisorPrompt(prompt: string): Dete
     if (candidate.evaluation?.passed === true && output?.passed === true) {
       scores.push({ candidateId: candidate.candidateId, score: output.score });
     }
-    if (!hasPinnedAuditor(observations, candidate.candidateId)) {
+    if (requirePinnedAuditors && !hasPinnedAuditor(observations, candidate.candidateId)) {
       return {
         ready: false,
         reason: `pinned_evaluation_auditor_missing:${candidate.candidateId}`,
@@ -159,6 +167,7 @@ export function deterministicSelectionFromSupervisorPrompt(prompt: string): Dete
 function guardedSupervisorResult(
   input: RuntimeTurnInput,
   output: RuntimeTurnResult,
+  options: DeterministicSelectionOptions,
 ): RuntimeTurnResult {
   if (input.agentId !== "supervisor") return output;
   let decision: SupervisorDecision;
@@ -169,7 +178,7 @@ function guardedSupervisorResult(
   }
   if (decision.status !== "accept") return output;
 
-  const selection = deterministicSelectionFromSupervisorPrompt(input.prompt);
+  const selection = deterministicSelectionFromSupervisorPrompt(input.prompt, options);
   const guarded: SupervisorDecision =
     !selection.ready || selection.selectedCandidateId === undefined
       ? {
@@ -202,13 +211,15 @@ function guardedSupervisorResult(
 
 export class DeterministicSelectionRuntime implements AgentRuntime {
   readonly #delegate: AgentRuntime;
+  readonly #options: DeterministicSelectionOptions;
 
-  constructor(delegate: AgentRuntime) {
+  constructor(delegate: AgentRuntime, options: DeterministicSelectionOptions = {}) {
     this.#delegate = delegate;
+    this.#options = options;
   }
 
   readonly runTurn = (input: RuntimeTurnInput) =>
     this.#delegate
       .runTurn(input)
-      .pipe(Effect.map((output) => guardedSupervisorResult(input, output)));
+      .pipe(Effect.map((output) => guardedSupervisorResult(input, output, this.#options)));
 }

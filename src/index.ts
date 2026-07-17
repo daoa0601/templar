@@ -6,6 +6,7 @@ export * from "./errors.js";
 export * from "./fake-runtime.js";
 export * from "./http.js";
 export * from "./pcap-analyzer.js";
+export * from "./pcap-security.js";
 export * from "./pcap-store.js";
 export * from "./policy.js";
 export * from "./service.js";

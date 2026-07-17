@@ -53,7 +53,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Templa
     ),
     maxPcapPackets: integer(
       environment.TEMPLAR_MAX_PCAP_PACKETS,
-      10_000,
+      50_000,
       "TEMPLAR_MAX_PCAP_PACKETS",
     ),
   };

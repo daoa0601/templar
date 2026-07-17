@@ -47,6 +47,7 @@
     "sample": "pnpm build && node --enable-source-maps dist/cli.js sample",
     "secrets:scan": "node scripts/quality/scan-secrets.mjs",
     "smoke:ctu13": "pnpm build && node --enable-source-maps scripts/smoke/ctu13.mjs",
+    "smoke:ctu13:harness": "pnpm build && node --enable-source-maps scripts/smoke/ctu13.mjs --harness",
     "start": "node dist/cli.js serve",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

@@ -6,7 +6,7 @@ import { ScriptedTemplarRuntime } from "../src/fake-runtime.js";
 import { startHttpServer } from "../src/http.js";
 import type { TemplarHttpServer } from "../src/http.js";
 import { TemplarService } from "../src/service.js";
-import { classicPcap, testConfig } from "./helpers.js";
+import { classicPcap, tcpPacket, testConfig } from "./helpers.js";
 
 const TOKEN = "local-test-token";
 const AUTH = { Authorization: `Bearer ${TOKEN}` };
@@ -100,9 +100,75 @@ describe("Templar HTTP and dashboard boundaries", () => {
       await fetch(`${server.origin}/api/runs/${submitted.run_id}/result`, { headers: AUTH })
     ).json()) as Record<string, unknown>;
     expect(result).toMatchObject({
-      evaluationAudit: { auditorCount: 1, harnessEvaluator: { passed: true } },
+      evaluation: {
+        strategy: "deterministic_evaluator_with_review",
+        evaluator: { passed: true },
+        review: { auditorCount: 1 },
+      },
       promotion: { eligible: true },
     });
+  }, 20_000);
+
+  it("routes strict PCAP security input through the scoped security workflow", async () => {
+    const config = await testConfig({ bearerToken: TOKEN });
+    const service = new TemplarService(config, {
+      runtimeFactory: () => new ScriptedTemplarRuntime(),
+    });
+    const server = await startHttpServer(service, { port: 0 });
+    servers.push(server);
+
+    const page = await (await fetch(`${server.origin}/`)).text();
+    expect(page).toContain("pcap_security_triage");
+    const artifactResponse = await fetch(`${server.origin}/api/artifacts/pcap`, {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/vnd.tcpdump.pcap" },
+      body: classicPcap([tcpPacket({ sequence: 1, flags: 0x02, destinationPort: 3389 })]),
+    });
+    const artifact = (await artifactResponse.json()) as { readonly artifact_id: string };
+    const submittedResponse = await fetch(
+      `${server.origin}/api/workflows/pcap_security_triage/runs`,
+      {
+        method: "POST",
+        headers: { ...AUTH, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schema_version: "1",
+          pcap_artifact_id: artifact.artifact_id,
+        }),
+      },
+    );
+    expect(submittedResponse.status).toBe(202);
+    const submitted = (await submittedResponse.json()) as { readonly run_id: string };
+    expect(await terminal(server.origin, submitted.run_id)).toMatchObject({
+      workflow: "pcap_security_triage",
+      status: "accepted",
+      selectedCandidateId: "candidate_a",
+      applied: true,
+    });
+    expect(
+      await (
+        await fetch(`${server.origin}/api/runs/${submitted.run_id}/result`, { headers: AUTH })
+      ).json(),
+    ).toMatchObject({
+      result: { assessment: "suspicious_needs_review" },
+      evaluation: {
+        strategy: "deterministic_evaluator",
+        passed: true,
+        manualReviewRequired: false,
+        review: null,
+      },
+      promotion: { reasons: ["security_result"], eligible: false },
+    });
+
+    const wrongShape = await fetch(`${server.origin}/api/workflows/pcap_security_triage/runs`, {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schema_version: "1",
+        pcap_artifact_id: artifact.artifact_id,
+        request: "This field is not part of the security workflow.",
+      }),
+    });
+    expect(wrongShape.status).toBe(400);
   }, 20_000);
 
   it("interrupts only a live process-owned fiber and exposes the durable terminal state", async () => {

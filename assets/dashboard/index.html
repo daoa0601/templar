@@ -21,11 +21,16 @@
     <main>
       <section class="panel submit">
         <div>
-          <span class="eyebrow">WORKFLOW 01</span>
-          <h2>Network incident</h2>
-          <p>Submit bounded evidence to the <code>telecom_incident</code> workflow.</p>
+          <span class="eyebrow">ANALYSIS WORKFLOW</span>
+          <h2>Network evidence</h2>
+          <p id="workflow-description">Investigate a bounded telecom incident.</p>
         </div>
         <form id="incident-form">
+          <label for="workflow">Workflow</label>
+          <select id="workflow">
+            <option value="telecom_incident">Telecom incident</option>
+            <option value="pcap_security_triage">PCAP security triage</option>
+          </select>
           <label for="request">Incident description</label>
           <textarea
             id="request"
@@ -34,7 +39,7 @@
             placeholder="Describe the observed network issue…"
           ></textarea>
           <div class="form-row">
-            <label
+            <label id="ticket-field"
               >Ticket reference<input id="ticket" maxlength="20" placeholder="NET-123"
             /></label>
             <label
@@ -58,7 +63,7 @@
       <section class="panel detail">
         <div class="section-heading">
           <div>
-            <span class="eyebrow">AUDIT TRAIL</span>
+            <span class="eyebrow">RUN STATE</span>
             <h2 id="detail-title">Select a run</h2>
           </div>
           <div>

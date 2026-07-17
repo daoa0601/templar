@@ -5,7 +5,7 @@ import { readRunEventRecords } from "aiur-orchestrator";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { decodeIncidentInput } from "../src/contracts.js";
+import { decodeIncidentInput, decodePcapSecurityTriageInput } from "../src/contracts.js";
 import { ScriptedTemplarRuntime } from "../src/fake-runtime.js";
 import { TemplarService } from "../src/service.js";
 import { classicPcap, tcpPacket, testConfig } from "./helpers.js";
@@ -71,17 +71,100 @@ describe("real harness integration with a scripted non-billing runtime", () => {
     expect(scores).toEqual([100, 83.333333]);
 
     const output = await service.result(submitted.run_id);
-    expect(output.evaluationAudit).toMatchObject({
-      auditorCount: 1,
-      traceInspected: true,
-      traceComplete: true,
-      manualAuditRequired: false,
-      harnessEvaluator: { passed: true },
+    expect(output.evaluation).toMatchObject({
+      strategy: "deterministic_evaluator_with_review",
+      passed: true,
+      manualReviewRequired: false,
+      evaluator: { passed: true },
+      review: { auditorCount: 1, traceInspected: true, traceComplete: true },
     });
     expect(output.promotion).toMatchObject({ eligible: true, acknowledged: false });
     expect(
       await readFile(path.join(service.incidentDirectory(submitted.run_id), "result.json"), "utf8"),
     ).toContain("evidence.incident.request");
+  }, 20_000);
+
+  it("runs lean PCAP security research, two isolated analysts, evaluation, and selection", async () => {
+    const config = await testConfig();
+    const service = new TemplarService(config, {
+      runtimeFactory: () => new ScriptedTemplarRuntime(),
+    });
+    await service.initialize();
+    const artifact = await service.stagePcap(
+      classicPcap([
+        tcpPacket({
+          sequence: 1,
+          flags: 0x02,
+          destinationPort: 25,
+          destination: [10, 0, 0, 2],
+        }),
+        tcpPacket({
+          sequence: 2,
+          flags: 0x02,
+          destinationPort: 3389,
+          destination: [10, 0, 0, 3],
+        }),
+      ]),
+    );
+    const submitted = await service.submitPcapSecurityTriage(
+      decodePcapSecurityTriageInput({
+        schema_version: "1",
+        pcap_artifact_id: artifact.artifact_id,
+      }),
+    );
+
+    expect(await waitForTerminal(service, submitted.run_id)).toMatchObject({
+      workflow: "pcap_security_triage",
+      status: "accepted",
+      selectedCandidateId: "candidate_a",
+      applied: true,
+      rounds: 3,
+      agentTurns: 3,
+      totalAgents: 3,
+    });
+    const records = await Effect.runPromise(
+      readRunEventRecords(config.harnessHome, submitted.run_id),
+    );
+    expect(
+      records.filter(
+        (event) =>
+          event.roleId === "security_evidence_researcher" && event.type === "agent.turn_completed",
+      ),
+    ).toHaveLength(1);
+    expect(
+      records.filter(
+        (event) => event.roleId === "evaluation_auditor" && event.type === "agent.turn_completed",
+      ),
+    ).toHaveLength(0);
+    const scores = records
+      .filter((event) => event.type === "candidate.snapshot")
+      .map((event) => {
+        const evaluation = event.evaluation as { readonly stdout?: string } | undefined;
+        return evaluation?.stdout === undefined
+          ? undefined
+          : (JSON.parse(evaluation.stdout) as { readonly score: number }).score;
+      });
+    expect(scores).toEqual([100, 83.75]);
+
+    const output = await service.result(submitted.run_id);
+    expect(output.result).toMatchObject({
+      assessment: "suspicious_needs_review",
+      promotion: { security_outcome: true, headline_result: false },
+      external_mutations: [],
+    });
+    expect(output.evaluation).toMatchObject({
+      strategy: "deterministic_evaluator",
+      passed: true,
+      manualReviewRequired: false,
+      evaluator: { passed: true },
+      review: null,
+    });
+    expect(output.promotion).toMatchObject({
+      requiresHumanAcknowledgment: true,
+      reasons: ["security_result"],
+      acknowledged: false,
+      eligible: false,
+    });
   }, 20_000);
 
   it("completes a PCAP-backed fake run and persists an immutable high-impact acknowledgment", async () => {

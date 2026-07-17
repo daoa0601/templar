@@ -58,4 +58,19 @@ describe("mechanical candidate selection", () => {
       reason: "pinned_evaluation_auditor_missing:candidate_b",
     });
   });
+
+  it("can select a lean evaluator-only workflow without an auditor round", () => {
+    expect(
+      deterministicSelectionFromSupervisorPrompt(prompt([100, 80], false), {
+        requirePinnedAuditors: false,
+      }),
+    ).toMatchObject({
+      ready: true,
+      selectedCandidateId: "candidate_a",
+      scores: [
+        { candidateId: "candidate_a", score: 100 },
+        { candidateId: "candidate_b", score: 80 },
+      ],
+    });
+  });
 });
