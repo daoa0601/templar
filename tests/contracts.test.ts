@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decodeExerciseSolveInput,
   decodeIncidentInput,
   decodePcapSecurityTriageInput,
   MAX_INCIDENT_TEXT,
@@ -72,5 +73,24 @@ describe("PcapSecurityTriageInput v1", () => {
     { schema_version: "1", pcap_artifact_id: artifact, max_tokens: 1_000_000 },
   ])("rejects unsupported or excess input %#", (input) => {
     expect(() => decodePcapSecurityTriageInput(input)).toThrow();
+  });
+});
+
+describe("ExerciseSolveInput v1", () => {
+  const artifact = `exercise_sha256_${"b".repeat(64)}`;
+
+  it("accepts only one opaque exercise snapshot ID", () => {
+    expect(
+      decodeExerciseSolveInput({ schema_version: "1", exercise_snapshot_id: artifact }),
+    ).toEqual({ schema_version: "1", exercise_snapshot_id: artifact });
+  });
+
+  it.each([
+    { schema_version: "1", exercise_snapshot_id: "static.exe" },
+    { schema_version: "1", exercise_snapshot_id: artifact, command: "objdump" },
+    { schema_version: "1", exercise_snapshot_id: artifact, path: "/tmp/sample.exe" },
+    { schema_version: "1", exercise_snapshot_id: artifact, workflow_id: "redteam.exercise" },
+  ])("rejects unsupported or excess input %#", (input) => {
+    expect(() => decodeExerciseSolveInput(input)).toThrow();
   });
 });

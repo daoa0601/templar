@@ -88,18 +88,24 @@ document.querySelector("#incident-form").addEventListener("submit", async (event
   try {
     const file = document.querySelector("#pcap").files[0];
     const securityTriage = workflow.value === "pcap_security_triage";
+    const exerciseSolve = workflow.value === "exercise_solve";
     if (securityTriage && !file) throw new Error("PCAP security triage requires a capture.");
     let artifact;
-    if (file)
+    if (file && !exerciseSolve)
       artifact = await api("/api/artifacts/pcap", {
         method: "POST",
         headers: { "Content-Type": "application/vnd.tcpdump.pcap" },
         body: file,
       });
-    const body = securityTriage
-      ? { schema_version: "1", pcap_artifact_id: artifact.artifact_id }
-      : { schema_version: "1", request: document.querySelector("#request").value };
-    if (!securityTriage) {
+    const body = exerciseSolve
+      ? {
+          schema_version: "1",
+          exercise_snapshot_id: document.querySelector("#exercise-snapshot").value.trim(),
+        }
+      : securityTriage
+        ? { schema_version: "1", pcap_artifact_id: artifact.artifact_id }
+        : { schema_version: "1", request: document.querySelector("#request").value };
+    if (!securityTriage && !exerciseSolve) {
       const ticket = document.querySelector("#ticket").value.trim();
       if (ticket) body.ticket_ref = ticket;
       if (artifact) body.pcap_artifact_id = artifact.artifact_id;
@@ -118,12 +124,18 @@ document.querySelector("#incident-form").addEventListener("submit", async (event
 });
 workflow.addEventListener("change", () => {
   const securityTriage = workflow.value === "pcap_security_triage";
-  document.querySelector("#request").disabled = securityTriage;
-  document.querySelector("#request").required = !securityTriage;
-  document.querySelector("#ticket-field").hidden = securityTriage;
-  document.querySelector("#workflow-description").textContent = securityTriage
-    ? "Passively triage one locally staged classic PCAP through scoped Aiur agents."
-    : "Investigate a bounded telecom incident.";
+  const exerciseSolve = workflow.value === "exercise_solve";
+  document.querySelector("#request").disabled = securityTriage || exerciseSolve;
+  document.querySelector("#request").required = !securityTriage && !exerciseSolve;
+  document.querySelector("#ticket-field").hidden = securityTriage || exerciseSolve;
+  document.querySelector("#exercise-field").hidden = !exerciseSolve;
+  document.querySelector("#exercise-snapshot").required = exerciseSolve;
+  document.querySelector("#pcap").disabled = exerciseSolve;
+  document.querySelector("#workflow-description").textContent = exerciseSolve
+    ? "Solve a bounded static-analysis exercise from an opaque evidence snapshot."
+    : securityTriage
+      ? "Passively triage one locally staged classic PCAP through scoped Aiur agents."
+      : "Investigate a bounded telecom incident.";
 });
 document
   .querySelector("#refresh")

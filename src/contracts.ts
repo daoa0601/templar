@@ -27,6 +27,11 @@ const PcapSecurityTriageInputSchema = Schema.Struct({
   pcap_artifact_id: Schema.String,
 });
 
+const ExerciseSolveInputSchema = Schema.Struct({
+  schema_version: Schema.Literal("1"),
+  exercise_snapshot_id: Schema.String,
+});
+
 const decodeIncidentShape = SchemaParser.decodeUnknownSync(IncidentInputSchema, {
   errors: "all",
   onExcessProperty: "error",
@@ -39,6 +44,11 @@ const decodePcapSecurityTriageShape = SchemaParser.decodeUnknownSync(
     onExcessProperty: "error",
   },
 );
+
+const decodeExerciseSolveShape = SchemaParser.decodeUnknownSync(ExerciseSolveInputSchema, {
+  errors: "all",
+  onExcessProperty: "error",
+});
 
 export interface StructuredObservation {
   readonly observation_id: string;
@@ -61,10 +71,16 @@ export interface PcapSecurityTriageInput {
   readonly pcap_artifact_id: string;
 }
 
+export interface ExerciseSolveInput {
+  readonly schema_version: "1";
+  readonly exercise_snapshot_id: string;
+}
+
 const SAFE_ID = /^[a-z][a-z0-9_.-]{0,63}$/u;
 const SAFE_KIND = /^[a-z][a-z0-9_.-]{0,63}$/u;
 const TICKET_REF = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,9}$/u;
 const ARTIFACT_ID = /^pcap_sha256_[a-f0-9]{64}$/u;
+const EXERCISE_SNAPSHOT_ID = /^exercise_sha256_[a-f0-9]{64}$/u;
 const PRIORITY = /^(?:lowest|low|medium|high|highest|p[1-5])$/iu;
 const URL = /\b(?:https?|file|ftp):\/\//iu;
 const WINDOWS_PATH = /(?:^|[\s("'=])[A-Za-z]:\\[^\s]+/u;
@@ -181,6 +197,23 @@ export function decodePcapSecurityTriageInput(value: unknown): PcapSecurityTriag
   }
   if (!ARTIFACT_ID.test(input.pcap_artifact_id)) {
     throw invalidInput("pcap_artifact_id must be a content-addressed PCAP artifact ID.");
+  }
+  return input;
+}
+
+export function isExerciseSnapshotId(value: string): boolean {
+  return EXERCISE_SNAPSHOT_ID.test(value);
+}
+
+export function decodeExerciseSolveInput(value: unknown): ExerciseSolveInput {
+  let input: typeof ExerciseSolveInputSchema.Type;
+  try {
+    input = decodeExerciseSolveShape(value);
+  } catch (cause) {
+    throw invalidInput("ExerciseSolveInput v1 does not match the strict schema.", cause);
+  }
+  if (!EXERCISE_SNAPSHOT_ID.test(input.exercise_snapshot_id)) {
+    throw invalidInput("exercise_snapshot_id must be a content-addressed exercise snapshot ID.");
   }
   return input;
 }

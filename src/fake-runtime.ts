@@ -44,6 +44,13 @@ interface FakePcapSecurityContext {
   readonly available_checks: ReadonlyArray<string>;
 }
 
+interface FakeExerciseContext {
+  readonly required_question_ids: ReadonlyArray<string>;
+  readonly required_observation_ids: ReadonlyArray<string>;
+  readonly known_observation_ids: ReadonlyArray<string>;
+  readonly available_checks: ReadonlyArray<string>;
+}
+
 const agentReport = JSON.stringify({
   status: "completed",
   summary: "Completed the assigned bounded phase.",
@@ -207,6 +214,47 @@ async function writeSecurityCandidate(
   );
 }
 
+async function writeExerciseCandidate(
+  input: RuntimeTurnInput,
+  completeCoverage: boolean,
+): Promise<void> {
+  const context = JSON.parse(
+    await readFile(path.join(input.cwd, "evaluation", "context.json"), "utf8"),
+  ) as FakeExerciseContext;
+  const completeObservations =
+    context.required_observation_ids.length > 0
+      ? context.required_observation_ids
+      : context.known_observation_ids;
+  const limitedObservations = context.known_observation_ids.slice(0, 1);
+  const output = {
+    schema_version: "1",
+    status: "completed",
+    summary: "Every bounded exercise question was answered from the supplied static observations.",
+    answers: context.required_question_ids.map((questionId, index) => ({
+      question_id: questionId,
+      answer: `The scripted runtime produced a structurally grounded answer for ${questionId}.`,
+      observation_ids: completeCoverage
+        ? [completeObservations[index % completeObservations.length]!]
+        : limitedObservations,
+      uncertainty:
+        "Semantic correctness is outside the scripted runtime; use the course smoke grade.",
+    })),
+    unanswered_question_ids: [],
+    checks_performed: context.available_checks,
+    external_mutations: [],
+  };
+  await writeFile(
+    path.join(input.cwd, "result.json"),
+    `${JSON.stringify(output, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(input.cwd, "report.md"),
+    `# Answers\n\nAll required question IDs have structured answers in result.json.\n\n# Method\n\nUsed only the bounded analyzer observations supplied in the immutable exercise snapshot.\n\n# Uncertainty\n\nThe scripted runtime validates orchestration and contracts, not semantic course correctness.\n`,
+    "utf8",
+  );
+}
+
 async function workflowId(cwd: string): Promise<string> {
   const parsed = JSON.parse(await readFile(path.join(cwd, "workflow.json"), "utf8")) as unknown;
   if (
@@ -312,10 +360,12 @@ export class ScriptedTemplarRuntime implements AgentRuntime {
         if (input.agentId !== "supervisor") {
           if (input.agentId === "candidate_a") {
             if (workflow === "pcap_security_triage") await writeSecurityCandidate(input, true);
+            else if (workflow === "exercise_solve") await writeExerciseCandidate(input, true);
             else await writeCandidate(input, true);
           }
           if (input.agentId === "candidate_b") {
             if (workflow === "pcap_security_triage") await writeSecurityCandidate(input, false);
+            else if (workflow === "exercise_solve") await writeExerciseCandidate(input, false);
             else await writeCandidate(input, false);
           }
           const finalText = input.agentId.startsWith("audit_")
@@ -325,6 +375,59 @@ export class ScriptedTemplarRuntime implements AgentRuntime {
         }
 
         this.#supervisorTurns += 1;
+        if (workflow === "exercise_solve") {
+          if (this.#supervisorTurns === 1) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Map the exercise questions to bounded static observations.",
+                assignments: [
+                  {
+                    agentId: "research_once",
+                    roleId: "exercise_researcher",
+                    task: "Map every question to relevant static observation IDs and gaps.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 2) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Create two independent grounded exercise answers.",
+                assignments: [
+                  {
+                    agentId: "candidate_a",
+                    roleId: "exercise_solver",
+                    task: "Answer every exercise question from the bounded analyzer observations.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "candidate_b",
+                    roleId: "exercise_solver",
+                    task: "Independently answer every question and cite static observation IDs.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          return result(
+            "supervisor-thread",
+            JSON.stringify({
+              status: "accept",
+              summary: "Accept the highest-scoring structurally grounded exercise result.",
+              assignments: [],
+              selectedCandidateId: "candidate_b",
+            }),
+          );
+        }
         if (workflow === "pcap_security_triage") {
           if (this.#supervisorTurns === 1) {
             return result(

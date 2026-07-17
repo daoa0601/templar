@@ -72,6 +72,13 @@ const PCAP_SECURITY_TRIAGE_BUDGET: WorkflowBudgets = {
   maxTokens: 300_000,
 };
 
+const EXERCISE_SOLVE_BUDGET: WorkflowBudgets = {
+  ...PASSIVE_BUDGET,
+  wallClockSeconds: 600,
+  maxTurns: 3,
+  maxTokens: 300_000,
+};
+
 const STATIC_BUDGET: WorkflowBudgets = {
   wallClockSeconds: 600,
   maxTurns: 4,
@@ -152,6 +159,25 @@ export const WORKFLOW_CATALOG: ReadonlyArray<WorkflowCatalogEntry> = [
     filesystemMode: "isolated_candidate_worktree",
     toolAllowlist: ["analyze_classic_pcap"],
     budgets: PCAP_SECURITY_TRIAGE_BUDGET,
+    evaluatorRequired: true,
+    traceAuditorRequired: false,
+    persistencePolicy: "bounded_case_record",
+    dataSensitivityPolicy: "operational",
+    releaseState: "enabled",
+  }),
+  entry({
+    id: "exercise_solve",
+    version: "1.0.0",
+    family: "reverse_engineering",
+    description: "Solve a bounded static-analysis exercise from a precomputed evidence snapshot.",
+    inputSchemaId: "templar://exercise_solve/ExerciseSolveInput/v1",
+    outputSchemaId: "templar://exercise_solve/ExerciseCandidateResult/v1",
+    requiredCapability: "RE_STATIC",
+    authorizationCheckpoint: "local_static_exercise_scope",
+    networkMode: "denied",
+    filesystemMode: "isolated_candidate_worktree",
+    toolAllowlist: [],
+    budgets: EXERCISE_SOLVE_BUDGET,
     evaluatorRequired: true,
     traceAuditorRequired: false,
     persistencePolicy: "bounded_case_record",

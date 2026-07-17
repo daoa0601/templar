@@ -7,7 +7,11 @@ import { fileURLToPath } from "node:url";
 
 import { WORKFLOW_CATALOG } from "./catalog.js";
 import type { TemplarConfig } from "./config.js";
-import { decodeIncidentInput, decodePcapSecurityTriageInput } from "./contracts.js";
+import {
+  decodeExerciseSolveInput,
+  decodeIncidentInput,
+  decodePcapSecurityTriageInput,
+} from "./contracts.js";
 import { redactedError, TemplarError } from "./errors.js";
 import type { TemplarService } from "./service.js";
 
@@ -64,7 +68,7 @@ async function jsonBody(request: http.IncomingMessage, limit: number): Promise<u
   if (contentType !== "application/json") {
     throw new TemplarError({
       code: "INVALID_INPUT",
-      message: "Run body must be JSON.",
+      message: "Request body must be JSON.",
       status: 415,
     });
   }
@@ -74,7 +78,7 @@ async function jsonBody(request: http.IncomingMessage, limit: number): Promise<u
     if (cause instanceof TemplarError) throw cause;
     throw new TemplarError({
       code: "INVALID_INPUT",
-      message: "Run body is not valid JSON.",
+      message: "Request body is not valid JSON.",
       status: 400,
       cause,
     });
@@ -153,6 +157,9 @@ async function handle(
   if (method === "GET" && url.pathname === "/api/workflows") {
     return sendJson(response, 200, WORKFLOW_CATALOG);
   }
+  if (method === "GET" && url.pathname === "/api/labs") {
+    return sendJson(response, 200, await service.labProviders());
+  }
   if (method === "POST" && url.pathname === "/api/artifacts/pcap") {
     const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
     if (
@@ -169,6 +176,15 @@ async function handle(
       response,
       201,
       await service.stagePcap(await body(request, service.config.maxPcapBytes)),
+    );
+  }
+  if (method === "POST" && url.pathname === "/api/artifacts/exercise-snapshot") {
+    return sendJson(
+      response,
+      201,
+      await service.stageExerciseSnapshot(
+        await jsonBody(request, service.config.maxExerciseSnapshotBytes),
+      ),
     );
   }
   if (
@@ -189,6 +205,15 @@ async function handle(
       202,
       await service.submitPcapSecurityTriage(
         decodePcapSecurityTriageInput(await jsonBody(request, service.config.maxJsonBytes)),
+      ),
+    );
+  }
+  if (method === "POST" && url.pathname === "/api/workflows/exercise_solve/runs") {
+    return sendJson(
+      response,
+      202,
+      await service.submitExerciseSolve(
+        decodeExerciseSolveInput(await jsonBody(request, service.config.maxJsonBytes)),
       ),
     );
   }

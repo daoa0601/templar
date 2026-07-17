@@ -1,9 +1,10 @@
 # Templar
 
 Templar is a local, policy-gated network and security analysis application built on the sibling
-`aiur-orchestrator` package. It ships two workflows: `telecom_incident` for bounded packet-loss
-diagnosis and `pcap_security_triage` for passive security analysis of one locally staged classic
-PCAP. Both use explicit Aiur roles, isolated candidate worktrees, a local evaluator, and mechanical
+`aiur-orchestrator` package. It ships three workflows: `telecom_incident` for bounded packet-loss
+diagnosis, `pcap_security_triage` for passive analysis of a locally staged classic PCAP, and
+`exercise_solve` for answering bounded reverse-engineering exercises from static analyzer output.
+All three use explicit Aiur roles, isolated candidate worktrees, a local evaluator, and mechanical
 candidate selection.
 
 Templar is a single-user local system, not a production or multi-tenant security boundary.
@@ -14,7 +15,7 @@ Templar is a single-user local system, not a production or multi-tenant security
 browser or CLI
   -> Templar loopback HTTP application
        -> strict workflow-specific decoder
-       -> content-addressed classic-PCAP store and bounded parser
+       -> content-addressed PCAP/exercise stores and bounded analyzers
        -> dedicated committed incident Git repository
        -> aiur-orchestrator
             -> read-only evidence researcher
@@ -91,27 +92,39 @@ pnpm smoke:ctu13
 # Run DonBot through the complete three-round harness with the scripted runtime.
 pnpm smoke:ctu13:harness
 
+# Build the static course snapshot and exercise the complete three-round workflow locally.
+# The executable is streamed from its archive into objdump and is never placed in an agent workspace.
+pnpm smoke:course-static
+
+# Run the same exercise with real agents through the authenticated Codex CLI.
+# This consumes ChatGPT subscription usage.
+pnpm smoke:course-static:real
+
 # Run the compiled server.
 pnpm build
 pnpm start
 ```
 
-The smoke commands download the captures into ignored local state under `.templar/smoke/ctu13`.
-The harness variant stages DonBot through the artifact store, workspace, Aiur loop, evaluator,
-selection guard, and result projection without invoking a model.
+Smoke state stays under the ignored `.templar/smoke` directory. The CTU-13 harness command and the
+default course command use the scripted runtime. The `:real` course command is the opt-in path that
+invokes Codex.
 
 Configuration:
 
-| Variable                   |      Default | Meaning                                                     |
-| -------------------------- | -----------: | ----------------------------------------------------------- |
-| `TEMPLAR_HOST`             |  `127.0.0.1` | HTTP bind host. Non-loopback requires a token.              |
-| `TEMPLAR_PORT`             |       `8080` | HTTP port.                                                  |
-| `TEMPLAR_HOME`             | `~/.templar` | Incident, artifact, acknowledgment, and harness state root. |
-| `TEMPLAR_BEARER_TOKEN`     |        unset | Optional in loopback development; required otherwise.       |
-| `TEMPLAR_MAX_ACTIVE_RUNS`  |          `2` | Process-local active-run admission cap.                     |
-| `TEMPLAR_MAX_JSON_BYTES`   |      `65536` | JSON request-body cap.                                      |
-| `TEMPLAR_MAX_PCAP_BYTES`   |    `8388608` | PCAP upload and analysis byte cap.                          |
-| `TEMPLAR_MAX_PCAP_PACKETS` |      `50000` | Packet parsing cap.                                         |
+| Variable                              |                 Default | Meaning                                                       |
+| ------------------------------------- | ----------------------: | ------------------------------------------------------------- |
+| `TEMPLAR_HOST`                        |             `127.0.0.1` | HTTP bind host. Non-loopback requires a token.                |
+| `TEMPLAR_PORT`                        |                  `8080` | HTTP port.                                                    |
+| `TEMPLAR_HOME`                        |            `~/.templar` | Incident, artifact, acknowledgment, and harness state root.   |
+| `TEMPLAR_BEARER_TOKEN`                |                   unset | Optional in loopback development; required otherwise.         |
+| `TEMPLAR_MAX_ACTIVE_RUNS`             |                     `2` | Process-local active-run admission cap.                       |
+| `TEMPLAR_MAX_JSON_BYTES`              |                 `65536` | JSON request-body cap.                                        |
+| `TEMPLAR_MAX_PCAP_BYTES`              |               `8388608` | PCAP upload and analysis byte cap.                            |
+| `TEMPLAR_MAX_PCAP_PACKETS`            |                 `50000` | Packet parsing cap.                                           |
+| `TEMPLAR_MAX_EXERCISE_SNAPSHOT_BYTES` |                `524288` | Decoded exercise snapshot cap.                                |
+| `TEMPLAR_PARALLELS_DESKTOP_ENABLED`   |                 `false` | Enables command planning only; it never enables VM execution. |
+| `TEMPLAR_PARALLELS_CLI`               | `/usr/local/bin/prlctl` | Parallels Desktop CLI location.                               |
+| `TEMPLAR_PARALLELS_QUARANTINE_ROOT`   | `<home>/labs/parallels` | Future run-owned disposable-lab root.                         |
 
 Callers cannot choose a workspace, evaluator command, Codex setting, executable, budget, URL, or host
 path through incident input.
@@ -154,6 +167,21 @@ submit a prompt or workflow ID in the body:
 }
 ```
 
+Exercise solving also uses a fixed-purpose input. First stage a strict `ExerciseSnapshot v1`, then
+submit only its content-addressed ID:
+
+```json
+{
+  "schema_version": "1",
+  "exercise_snapshot_id": "exercise_sha256_<64 lowercase hex characters>"
+}
+```
+
+An exercise snapshot contains bounded question text, artifact identity, analyzer identity, static
+observations, and declared checks. It has no executable, host-path lookup, URL-fetch, arbitrary agent
+prompt, or evaluator-command field. Path- or URL-like strings inside analyzer output remain untrusted
+evidence and do not cause Templar to access them.
+
 Routes:
 
 | Method and path                                 | Purpose                                                  |
@@ -162,10 +190,13 @@ Routes:
 | `GET /health/live`                              | Process liveness.                                        |
 | `GET /health/ready`                             | Local storage readiness.                                 |
 | `GET /api/workflows`                            | Typed workflow catalog and release states.               |
+| `GET /api/labs`                                 | Read-only lab-provider capability status.                |
 | `POST /api/artifacts/pcap`                      | Stage one classic PCAP binary.                           |
+| `POST /api/artifacts/exercise-snapshot`         | Stage one strict exercise snapshot.                      |
 | `POST /api/incidents`                           | Compatibility alias for a telecom incident run.          |
 | `POST /api/workflows/telecom_incident/runs`     | Start a strictly decoded telecom incident run.           |
 | `POST /api/workflows/pcap_security_triage/runs` | Start passive security triage of one staged PCAP.        |
+| `POST /api/workflows/exercise_solve/runs`       | Solve one staged static-analysis exercise.               |
 | `GET /api/runs`                                 | Newest-first persisted run list.                         |
 | `GET /api/runs/:runId`                          | Persisted run projection and budget usage.               |
 | `GET /api/runs/:runId/events?after=N`           | Cursor-based redacted event timeline.                    |
@@ -181,7 +212,7 @@ and static assets remain available without it. Errors use stable redacted JSON c
 Templar keeps three data classes separate:
 
 - `EvidenceItem` records an immutable source identity, SHA-256, acquisition availability, context,
-  sensitivity, parser version, provenance, and typed facts.
+  sensitivity, parser version, source metadata, and typed facts.
 - `Finding` is a reproducible rule result referencing evidence IDs, fact IDs, and exact
   document/section citations.
 - `Hypothesis` is an interpretation referencing findings, with confidence, alternatives, and
@@ -219,17 +250,32 @@ data sensitivity, and release state.
 | `RE_DYNAMIC_LAB`   | Requires an attested disposable lab, simulated/allowlisted network, quarantine, timeout, rollback, logging, emergency stop, and human approval.                                                       |
 | `ACTIVE_TEST`      | Disabled by default; requires verified current written ROE, exact target/method allowlists, exclusions, legal grantor, emergency contact, kill switch, lab attestation, and immediate human approval. |
 
-`telecom_incident` and `pcap_security_triage` are enabled. Authorization/evidence/DFIR/static
-analysis/intelligence/detection/advisory/planning entries remain `planned`. Dynamic observation,
-debugging, .NET runtime work, and C2 emulation are `requires_lab`. `redteam.exercise` is `disabled`.
-Capabilities are non-transitive: defensive intent does not grant active testing, and `RE_STATIC` does
-not grant `RE_DYNAMIC_LAB`.
+`telecom_incident`, `pcap_security_triage`, and `exercise_solve` are enabled. Other
+authorization/evidence/DFIR/static-analysis/intelligence/detection/advisory/planning entries remain
+`planned`. Dynamic observation, debugging, .NET runtime work, and C2 emulation are `requires_lab`.
+`redteam.exercise` is `disabled`. Capabilities are non-transitive: defensive intent does not grant
+active testing, and `RE_STATIC` does not grant `RE_DYNAMIC_LAB`.
+
+## Disposable lab backend
+
+[Parallels Toolbox](https://www.parallels.com/products/toolbox/) is a desktop utility collection; it
+is not a VM backend. Templar targets [Parallels Desktop](https://www.parallels.com/products/desktop/)
+and its `prlctl` CLI. The current boundary reports local CLI availability and constructs fixed,
+shell-free plans for clone-from-snapshot, restore, start, one allowlisted guest capture operation,
+screenshot, and stop. It does not enumerate, clone, start, execute in, or stop a VM.
+
+`GET /api/labs` therefore always reports `mutations_available: false`. Even when
+`TEMPLAR_PARALLELS_DESKTOP_ENABLED=true`, only plan construction is unlocked. A later executor must
+add an allowlisted base VM and snapshot, guest attestation, watchdog timeouts, artifact transfer,
+network quarantine, rollback, and an emergency stop before dynamic exercises can use it.
 
 ## Evaluation and promotion
 
 `telecom_incident` retains its four-round researcher/candidate/reviewer flow. Security triage is
 deliberately leaner: one read-only researcher, two isolated analysts, then deterministic selection in
-three rounds and three agent turns. It has no audit-agent round.
+three rounds and three agent turns. Exercise solving uses the same three-turn shape with one
+question-to-evidence researcher and two independent solvers. Neither workflow adds an audit-agent
+round.
 
 For both workflows, Aiur runs the declared local evaluator against each candidate snapshot. Templar
 selects the highest passing coverage score and breaks an exact tie by candidate ordinal
@@ -245,6 +291,8 @@ operator performs that action explicitly through the API or dashboard.
 Each submission creates `TEMPLAR_HOME/incidents/<runId>` exclusively, populates deterministic inputs,
 initializes Git, and commits the baseline. Telecom cases copy their versioned documents and policy;
 security cases contain only bounded analyzer facts, the compact triage playbook, and evaluator inputs.
+Exercise cases contain only the decoded snapshot and evaluator inputs; the artifact itself never
+enters an agent worktree.
 Candidate changes are applied only there with `apply: true`; Templar never applies to its own source
 repository or an arbitrary caller path.
 
@@ -260,16 +308,16 @@ promotion acknowledgment without an explicit user action.
 ## Content and security exclusions
 
 The repository preserves only the original versioned telecom documents under `domain/v1/documents`.
-It does not copy course PDFs/PPTX files, recordings, archives, assignments, screenshots, diagrams,
-samples, executable payloads, disassembly listings, decryption code, exploit commands, personal
-identifiers, or deanonymization steps. Templar contains only its own compact triage playbook and
-bounded packet-analysis contracts.
+It does not commit course PDFs/PPTX files, recordings, archives, assignments, screenshots, diagrams,
+samples, executable payloads, answer keys, personal identifiers, or deanonymization steps. Generated
+course snapshots, disassembly observations, runs, and optional local grading data remain in ignored
+Templar state.
 
 Unknown or sensitive samples and customer IOCs are never automatically uploaded. Protect
 `TEMPLAR_HOME`: incident workspaces, raw PCAPs, harness journals, candidate patches, and reports may
 contain operationally sensitive data. Local content hashes provide identity, not confidentiality.
 
-## Verification
+## Quality gates
 
 ```bash
 pnpm check      # format, oxlint, typecheck, secret scan, and Vitest
@@ -283,10 +331,8 @@ git status --short
 See [QUALITY.md](QUALITY.md) for the pinned pnpm, coverage, dependency, package, secret, and local-hook
 gates.
 
-Tests generate tiny classic-PCAP fixtures in code. They cover strict schemas; URL/path rejection;
-artifact digest/symlink/format/byte/packet gates; pure ACK, retransmission, RST, zero-window, UDP/TCP
-DNS QR, and fragment behavior; 3%/7% policy boundaries; stable corpus IDs; EvidenceItem/Finding/
-Hypothesis separation; telecom and security evaluator behavior; candidate selection; workspace
-initialization; both complete harness workflows with an injected scripted runtime; strict HTTP
-routing; dashboard boundaries; and immutable acknowledgment. No test invokes Codex or consumes
-ChatGPT subscription usage.
+Tests generate tiny classic-PCAP and exercise fixtures in code. They cover strict schemas;
+URL/path/symlink rejection; artifact byte and packet limits; packet parsing; policy boundaries;
+workspace initialization; evaluator contracts; deterministic selection; all three complete harness
+workflows with an injected scripted runtime; HTTP routing; lab-plan gating; dashboard boundaries; and
+immutable acknowledgment. No test invokes Codex or consumes ChatGPT subscription usage.

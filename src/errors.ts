@@ -2,6 +2,8 @@ export type TemplarErrorCode =
   | "AUTH_REQUIRED"
   | "BODY_TOO_LARGE"
   | "CONFLICT"
+  | "EXERCISE_INVALID"
+  | "EXERCISE_LIMIT_EXCEEDED"
   | "INVALID_INPUT"
   | "NOT_FOUND"
   | "PCAP_INVALID"

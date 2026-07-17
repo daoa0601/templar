@@ -22,7 +22,7 @@
       <section class="panel submit">
         <div>
           <span class="eyebrow">ANALYSIS WORKFLOW</span>
-          <h2>Network evidence</h2>
+          <h2>Evidence analysis</h2>
           <p id="workflow-description">Investigate a bounded telecom incident.</p>
         </div>
         <form id="incident-form">
@@ -30,6 +30,7 @@
           <select id="workflow">
             <option value="telecom_incident">Telecom incident</option>
             <option value="pcap_security_triage">PCAP security triage</option>
+            <option value="exercise_solve">Static exercise solver</option>
           </select>
           <label for="request">Incident description</label>
           <textarea
@@ -38,6 +39,12 @@
             required
             placeholder="Describe the observed network issue…"
           ></textarea>
+          <label id="exercise-field" hidden
+            >Exercise snapshot ID<input
+              id="exercise-snapshot"
+              maxlength="80"
+              placeholder="exercise_sha256_…"
+          /></label>
           <div class="form-row">
             <label id="ticket-field"
               >Ticket reference<input id="ticket" maxlength="20" placeholder="NET-123"

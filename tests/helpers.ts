@@ -15,11 +15,16 @@ export async function testConfig(overrides: Partial<TemplarConfig> = {}): Promis
     port: 0,
     templarHome,
     artifactRoot: path.join(templarHome, "artifacts", "pcap"),
+    exerciseArtifactRoot: path.join(templarHome, "artifacts", "exercise"),
     harnessHome: path.join(templarHome, "harness"),
     maxActiveRuns: 2,
     maxJsonBytes: 4096,
     maxPcapBytes: 1024 * 1024,
     maxPcapPackets: 100,
+    maxExerciseSnapshotBytes: 256 * 1024,
+    parallelsDesktopEnabled: false,
+    parallelsCliPath: "/usr/local/bin/prlctl",
+    parallelsQuarantineRoot: path.join(templarHome, "labs", "parallels"),
     ...overrides,
   };
 }

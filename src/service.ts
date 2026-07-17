@@ -23,13 +23,22 @@ import type { Fiber as EffectFiber } from "effect/Fiber";
 
 import type { TemplarConfig } from "./config.js";
 import { requiresHumanAcknowledgment, workflowEntry } from "./catalog.js";
-import type { IncidentInput, PcapSecurityTriageInput } from "./contracts.js";
+import type { ExerciseSolveInput, IncidentInput, PcapSecurityTriageInput } from "./contracts.js";
 import { TemplarError } from "./errors.js";
+import { ExerciseSnapshotStore } from "./exercise-store.js";
+import type { StoredExerciseSnapshot } from "./exercise-store.js";
 import { analyzeClassicPcapFile } from "./pcap-analyzer.js";
 import { PcapArtifactStore } from "./pcap-store.js";
 import type { StoredPcapArtifact } from "./pcap-store.js";
-import { pcapSecurityTriageWorkflow, telecomIncidentWorkflow } from "./workflow.js";
+import { parallelsDesktopStatus } from "./lab-provider.js";
+import type { LabProviderStatus } from "./lab-provider.js";
 import {
+  exerciseSolveWorkflow,
+  pcapSecurityTriageWorkflow,
+  telecomIncidentWorkflow,
+} from "./workflow.js";
+import {
+  initializeExerciseSolveWorkspace,
   initializePcapSecurityTriageWorkspace,
   initializeTelecomIncidentWorkspace,
 } from "./workspace.js";
@@ -92,6 +101,7 @@ export interface PromotionView {
 export class TemplarService {
   readonly config: TemplarConfig;
   readonly artifacts: PcapArtifactStore;
+  readonly exercises: ExerciseSnapshotStore;
   readonly #runtimeFactory:
     ((runId: string, workflowId: string) => AgentRuntime | undefined) | undefined;
   readonly #active = new Map<string, RunFiber>();
@@ -105,6 +115,10 @@ export class TemplarService {
   ) {
     this.config = config;
     this.artifacts = new PcapArtifactStore(config.artifactRoot, config.maxPcapBytes);
+    this.exercises = new ExerciseSnapshotStore(
+      config.exerciseArtifactRoot,
+      config.maxExerciseSnapshotBytes,
+    );
     this.#runtimeFactory = options.runtimeFactory;
   }
 
@@ -116,10 +130,25 @@ export class TemplarService {
     await mkdir(path.join(this.config.templarHome, "incidents"), { recursive: true, mode: 0o700 });
     await mkdir(this.config.harnessHome, { recursive: true, mode: 0o700 });
     await this.artifacts.initialize();
+    await this.exercises.initialize();
   }
 
   async stagePcap(bytes: Uint8Array): Promise<StoredPcapArtifact> {
     return this.artifacts.stage(bytes);
+  }
+
+  async stageExerciseSnapshot(value: unknown): Promise<StoredExerciseSnapshot> {
+    return this.exercises.stage(value);
+  }
+
+  async labProviders(): Promise<ReadonlyArray<LabProviderStatus>> {
+    return [
+      await parallelsDesktopStatus({
+        enabled: this.config.parallelsDesktopEnabled,
+        cliPath: this.config.parallelsCliPath,
+        quarantineRoot: this.config.parallelsQuarantineRoot,
+      }),
+    ];
   }
 
   async submitTelecomIncident(incident: IncidentInput): Promise<SubmitResult> {
@@ -156,6 +185,21 @@ export class TemplarService {
       });
       return {
         workflow: pcapSecurityTriageWorkflow(workspace),
+        requirePinnedAuditors: false,
+      };
+    });
+  }
+
+  async submitExerciseSolve(input: ExerciseSolveInput): Promise<SubmitResult> {
+    return this.#submit(async (runId) => {
+      const snapshot = await this.exercises.resolve(input.exercise_snapshot_id);
+      const workspace = await initializeExerciseSolveWorkspace({
+        templarHome: this.config.templarHome,
+        runId,
+        snapshot,
+      });
+      return {
+        workflow: exerciseSolveWorkflow(workspace),
         requirePinnedAuditors: false,
       };
     });

@@ -48,6 +48,8 @@
     "secrets:scan": "node scripts/quality/scan-secrets.mjs",
     "smoke:ctu13": "pnpm build && node --enable-source-maps scripts/smoke/ctu13.mjs",
     "smoke:ctu13:harness": "pnpm build && node --enable-source-maps scripts/smoke/ctu13.mjs --harness",
+    "smoke:course-static": "pnpm build && node --enable-source-maps scripts/smoke/course-static.mjs",
+    "smoke:course-static:real": "pnpm build && node --enable-source-maps scripts/smoke/course-static.mjs --real",
     "start": "node dist/cli.js serve",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

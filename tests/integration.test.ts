@@ -5,10 +5,15 @@ import { readRunEventRecords } from "aiur-orchestrator";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { decodeIncidentInput, decodePcapSecurityTriageInput } from "../src/contracts.js";
+import {
+  decodeExerciseSolveInput,
+  decodeIncidentInput,
+  decodePcapSecurityTriageInput,
+} from "../src/contracts.js";
 import { ScriptedTemplarRuntime } from "../src/fake-runtime.js";
 import { TemplarService } from "../src/service.js";
 import { classicPcap, tcpPacket, testConfig } from "./helpers.js";
+import { exerciseSnapshot } from "./exercise-fixture.js";
 
 async function waitForTerminal(service: TemplarService, runId: string) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -164,6 +169,69 @@ describe("real harness integration with a scripted non-billing runtime", () => {
       reasons: ["security_result"],
       acknowledged: false,
       eligible: false,
+    });
+  }, 20_000);
+
+  it("runs a bounded static exercise through research, two solvers, and deterministic selection", async () => {
+    const config = await testConfig();
+    const service = new TemplarService(config, {
+      runtimeFactory: () => new ScriptedTemplarRuntime(),
+    });
+    await service.initialize();
+    const artifact = await service.stageExerciseSnapshot(exerciseSnapshot());
+    const submitted = await service.submitExerciseSolve(
+      decodeExerciseSolveInput({
+        schema_version: "1",
+        exercise_snapshot_id: artifact.artifact_id,
+      }),
+    );
+
+    expect(await waitForTerminal(service, submitted.run_id)).toMatchObject({
+      workflow: "exercise_solve",
+      status: "accepted",
+      selectedCandidateId: "candidate_a",
+      applied: true,
+      rounds: 3,
+      agentTurns: 3,
+      totalAgents: 3,
+    });
+    const records = await Effect.runPromise(
+      readRunEventRecords(config.harnessHome, submitted.run_id),
+    );
+    expect(
+      records.filter(
+        (event) => event.roleId === "exercise_researcher" && event.type === "agent.turn_completed",
+      ),
+    ).toHaveLength(1);
+    expect(
+      records.filter(
+        (event) => event.roleId === "evaluation_auditor" && event.type === "agent.turn_completed",
+      ),
+    ).toHaveLength(0);
+    const scores = records
+      .filter((event) => event.type === "candidate.snapshot")
+      .map((event) => {
+        const evaluation = event.evaluation as { readonly stdout?: string } | undefined;
+        return evaluation?.stdout === undefined
+          ? undefined
+          : (JSON.parse(evaluation.stdout) as { readonly score: number }).score;
+      });
+    expect(scores).toEqual([100, 85]);
+
+    const output = await service.result(submitted.run_id);
+    expect(output.result).toMatchObject({
+      status: "completed",
+      unanswered_question_ids: [],
+      external_mutations: [],
+    });
+    expect(output.evaluation).toMatchObject({
+      strategy: "deterministic_evaluator",
+      passed: true,
+      review: null,
+    });
+    expect(output.promotion).toMatchObject({
+      requiresHumanAcknowledgment: false,
+      eligible: true,
     });
   }, 20_000);
 
