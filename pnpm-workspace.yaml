@@ -1,0 +1,20 @@
+packages:
+  - "."
+
+auditLevel: high
+blockExoticSubdeps: true
+engineStrict: true
+minimumReleaseAge: 1440
+minimumReleaseAgeIgnoreMissingTime: false
+minimumReleaseAgeStrict: true
+nodeVersion: 22.22.2
+pmOnFail: error
+savePrefix: ""
+strictDepBuilds: true
+strictPeerDependencies: true
+verifyDepsBeforeRun: error
+
+allowBuilds:
+  aiur-orchestrator@file:../aiur-orchestrator: true
+  esbuild: true
+  msgpackr-extract: false

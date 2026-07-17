@@ -1,0 +1,58 @@
+{
+  "schema_version": "1",
+  "policy_id": "POLICY-TCP-RETRANS-001",
+  "policy_version": "1.0.0",
+  "source": {
+    "document_id": "SOP-NET-001",
+    "section_id": "SOP-NET-001#1"
+  },
+  "metric": "tcp_retransmission_percent",
+  "unit": "percent",
+  "bands": [
+    {
+      "severity": "none",
+      "minimum": 0,
+      "maximum": 1,
+      "minimum_inclusive": true,
+      "maximum_inclusive": false
+    },
+    {
+      "severity": "low",
+      "minimum": 1,
+      "maximum": 3,
+      "minimum_inclusive": true,
+      "maximum_inclusive": false
+    },
+    {
+      "severity": "medium",
+      "minimum": 3,
+      "maximum": 7,
+      "minimum_inclusive": false,
+      "maximum_inclusive": false
+    },
+    {
+      "severity": "high",
+      "minimum": 7,
+      "maximum": null,
+      "minimum_inclusive": false,
+      "maximum_inclusive": false
+    }
+  ],
+  "ambiguous_boundaries": [
+    {
+      "value": 3,
+      "severity": "boundary_ambiguous",
+      "reason": "SOP low and medium prose bands both include exactly 3%."
+    },
+    {
+      "value": 7,
+      "severity": "boundary_ambiguous",
+      "reason": "SOP medium and high prose bands both include exactly 7%."
+    }
+  ],
+  "actions": [
+    { "action_id": "sop.step.2.1", "ordinal": 1, "section_id": "SOP-NET-001#2.1" },
+    { "action_id": "sop.step.2.2", "ordinal": 2, "section_id": "SOP-NET-001#2.2" },
+    { "action_id": "sop.step.3", "ordinal": 3, "section_id": "SOP-NET-001#3" }
+  ]
+}

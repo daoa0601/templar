@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Templar local orchestrator dashboard" />
+    <title>Templar</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <span class="eyebrow">LOCAL ORCHESTRATOR</span>
+        <h1>Templar</h1>
+      </div>
+      <div class="auth">
+        <label for="token">Bearer token</label
+        ><input id="token" type="password" autocomplete="off" placeholder="optional on loopback" />
+      </div>
+    </header>
+    <main>
+      <section class="panel submit">
+        <div>
+          <span class="eyebrow">WORKFLOW 01</span>
+          <h2>Network incident</h2>
+          <p>Submit bounded evidence to the <code>telecom_incident</code> workflow.</p>
+        </div>
+        <form id="incident-form">
+          <label for="request">Incident description</label>
+          <textarea
+            id="request"
+            maxlength="4000"
+            required
+            placeholder="Describe the observed network issue…"
+          ></textarea>
+          <div class="form-row">
+            <label
+              >Ticket reference<input id="ticket" maxlength="20" placeholder="NET-123"
+            /></label>
+            <label
+              >Classic PCAP<input id="pcap" type="file" accept=".pcap,application/vnd.tcpdump.pcap"
+            /></label>
+          </div>
+          <button type="submit">Start bounded run</button
+          ><span id="form-status" role="status"></span>
+        </form>
+      </section>
+      <section class="panel runs">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">DURABLE STATE</span>
+            <h2>Runs</h2>
+          </div>
+          <button id="refresh" class="secondary">Refresh</button>
+        </div>
+        <div id="run-list" class="run-list"><p class="muted">No runs loaded.</p></div>
+      </section>
+      <section class="panel detail">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">AUDIT TRAIL</span>
+            <h2 id="detail-title">Select a run</h2>
+          </div>
+          <div>
+            <button id="acknowledge" class="secondary" hidden>Acknowledge promotion</button>
+            <button id="cancel" class="danger" hidden>Cancel active run</button>
+          </div>
+        </div>
+        <div id="run-summary" class="summary-grid"></div>
+        <h3>Timeline</h3>
+        <ol id="timeline" class="timeline">
+          <li class="muted">Persisted harness events appear here.</li>
+        </ol>
+        <div id="final-output"></div>
+      </section>
+    </main>
+    <footer>
+      Templar renders persisted harness state. Browser code never dispatches agents or evaluates
+      candidates.
+    </footer>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

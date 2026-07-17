@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.templar/schemas/candidate-result.v1.json",
+  "title": "Telecom candidate result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "summary",
+    "severity",
+    "evidence_ids",
+    "citations",
+    "metric_claims",
+    "findings",
+    "action_plan",
+    "unknown_ids",
+    "checks_performed",
+    "evaluationAudit",
+    "promotion",
+    "external_mutations"
+  ],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "status": { "enum": ["completed", "needs_review"] },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "severity": { "enum": ["none", "low", "medium", "high", "boundary_ambiguous"] },
+    "evidence_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["document_id", "section_id"],
+        "properties": {
+          "document_id": { "type": "string" },
+          "section_id": { "type": "string" }
+        }
+      }
+    },
+    "metric_claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fact_id", "metric", "value"],
+        "properties": {
+          "fact_id": { "type": "string" },
+          "metric": { "type": "string" },
+          "value": { "type": "number" }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding_id", "rule_id", "severity", "evidence_ids", "statement"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "rule_id": { "type": "string" },
+          "severity": { "type": "string" },
+          "evidence_ids": { "type": "array", "items": { "type": "string" } },
+          "statement": { "type": "string" }
+        }
+      }
+    },
+    "action_plan": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ordinal", "action_id", "source_rule_ids", "prerequisites"],
+        "properties": {
+          "ordinal": { "type": "integer", "minimum": 1 },
+          "action_id": { "type": "string" },
+          "source_rule_ids": { "type": "array", "items": { "type": "string" } },
+          "prerequisites": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "unknown_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "checks_performed": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "evaluationAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checks_rerun",
+        "suspicious_behavior",
+        "findings",
+        "disposition",
+        "manualAuditRequired",
+        "trace_available"
+      ],
+      "properties": {
+        "checks_rerun": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "suspicious_behavior": { "type": "array", "items": { "type": "string" } },
+        "findings": { "type": "array", "items": { "type": "string" } },
+        "disposition": { "enum": ["pass", "manual_review"] },
+        "manualAuditRequired": { "type": "boolean" },
+        "trace_available": { "type": "boolean" }
+      }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["impact", "security_outcome", "headline_result"],
+      "properties": {
+        "impact": { "enum": ["routine", "high"] },
+        "security_outcome": { "type": "boolean" },
+        "headline_result": { "type": "boolean" }
+      }
+    },
+    "external_mutations": { "type": "array", "maxItems": 0 }
+  }
+}

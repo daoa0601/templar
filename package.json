@@ -1,0 +1,66 @@
+{
+  "name": "templar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Policy-gated network and security analysis powered by Aiur",
+  "packageManager": "pnpm@11.13.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daoa0601/templar.git"
+  },
+  "homepage": "https://github.com/daoa0601/templar#readme",
+  "bugs": "https://github.com/daoa0601/templar/issues",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0",
+    "pnpm": "11.13.1"
+  },
+  "bin": {
+    "templar": "./dist/cli.js"
+  },
+  "files": [
+    "assets",
+    "dist",
+    "domain/v1",
+    "README.md",
+    "QUALITY.md",
+    "scripts/quality/require-pnpm.mjs"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "pnpm quality:quick && pnpm test",
+    "deps:audit": "pnpm audit --prod --audit-level high",
+    "deps:check": "pnpm deps:audit && pnpm deps:signatures",
+    "deps:signatures": "pnpm audit signatures",
+    "demo": "pnpm build && node --enable-source-maps dist/cli.js demo",
+    "dev": "pnpm build && node --enable-source-maps dist/cli.js serve",
+    "format": "prettier --write . --ignore-unknown",
+    "format:check": "prettier --check . --ignore-unknown",
+    "hooks:install": "node scripts/quality/install-hooks.mjs",
+    "lint": "oxlint src tests scripts vitest.config.ts --deny-warnings",
+    "pack:check": "node scripts/quality/check-pack.mjs",
+    "preflight": "pnpm quality",
+    "preinstall": "node scripts/quality/require-pnpm.mjs",
+    "quality": "pnpm quality:offline && pnpm deps:check",
+    "quality:offline": "pnpm quality:quick && pnpm test:coverage && pnpm build && pnpm pack:check",
+    "quality:quick": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm secrets:scan",
+    "sample": "pnpm build && node --enable-source-maps dist/cli.js sample",
+    "secrets:scan": "node scripts/quality/scan-secrets.mjs",
+    "start": "node dist/cli.js serve",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "aiur-orchestrator": "file:../aiur-orchestrator",
+    "effect": "4.0.0-beta.98"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "oxlint": "1.74.0",
+    "prettier": "3.9.5",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

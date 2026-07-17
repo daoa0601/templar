@@ -1,0 +1,25 @@
+{
+  "schema_version": "1",
+  "corpus_id": "telecom-corpus-v1",
+  "documents": [
+    {
+      "document_id": "HW-CFG-012",
+      "path": "documents/cisco_catalyst_9300_config.md",
+      "sections": [
+        "HW-CFG-012#standard-port-configuration",
+        "HW-CFG-012#verifying-dns-configuration"
+      ]
+    },
+    {
+      "document_id": "SOP-NET-001",
+      "path": "documents/sop_packet_loss.md",
+      "sections": [
+        "SOP-NET-001#1",
+        "SOP-NET-001#2",
+        "SOP-NET-001#2.1",
+        "SOP-NET-001#2.2",
+        "SOP-NET-001#3"
+      ]
+    }
+  ]
+}

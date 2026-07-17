@@ -1,0 +1,4 @@
+coverage/
+dist/
+domain/v1/documents/
+node_modules/
