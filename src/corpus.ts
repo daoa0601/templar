@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 export const CORPUS_ID = "telecom-corpus-v1";
 export const POLICY_ID = "POLICY-TCP-RETRANS-001";
 export const POLICY_VERSION = "1.0.0";
-export const ANALYZER_VERSION = "classic-pcap-v1";
+export const ANALYZER_VERSION = "classic-pcap-v2";
 
 export const DOCUMENT_SECTIONS = {
   "HW-CFG-012": [

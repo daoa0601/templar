@@ -15,11 +15,11 @@ import {
 
 const limits = { maxBytes: 1024 * 1024, maxPackets: 100 };
 
-function fact(
+function fact<T = Record<string, number>>(
   analysis: ReturnType<typeof analyzeClassicPcapBytes>,
   id: string,
-): Record<string, number> {
-  return analysis.facts.find((item) => item.fact_id === id)?.value as Record<string, number>;
+): T {
+  return analysis.facts.find((item) => item.fact_id === id)?.value as T;
 }
 
 describe("bounded classic-PCAP analysis", () => {
@@ -95,6 +95,73 @@ describe("bounded classic-PCAP analysis", () => {
       limits,
     );
     expect(fact(analysis, "fact.dns.qr_counts")).toEqual({ queries: 0, responses: 0 });
+  });
+
+  it("profiles destination services, transport conversations, and source fan-out", () => {
+    const analysis = analyzeClassicPcapBytes(
+      classicPcap([
+        tcpPacket({
+          sequence: 1,
+          flags: 0x02,
+          sourcePort: 40_000,
+          destinationPort: 25,
+          destination: [10, 0, 0, 2],
+        }),
+        tcpPacket({
+          sequence: 2,
+          flags: 0x04,
+          sourcePort: 40_001,
+          destinationPort: 5678,
+          destination: [10, 0, 0, 3],
+        }),
+        tcpPacket({
+          sequence: 3,
+          flags: 0x02,
+          sourcePort: 40_000,
+          destinationPort: 25,
+          destination: [10, 0, 0, 2],
+        }),
+      ]),
+      "pcap_sha256_test",
+      limits,
+    );
+
+    expect(
+      fact<ReadonlyArray<Record<string, number | string>>>(
+        analysis,
+        "fact.transport.destination_ports",
+      ),
+    ).toEqual([
+      { protocol: "tcp", port: 25, packets: 2 },
+      { protocol: "tcp", port: 5678, packets: 1 },
+    ]);
+    expect(
+      fact<ReadonlyArray<Record<string, number | string>>>(
+        analysis,
+        "fact.transport.conversations",
+      )[0],
+    ).toEqual({
+      protocol: "tcp",
+      source: "10.0.0.1",
+      source_port: 40_000,
+      destination: "10.0.0.2",
+      destination_port: 25,
+      packets: 2,
+    });
+    expect(
+      fact<ReadonlyArray<Record<string, number | string>>>(
+        analysis,
+        "fact.transport.source_profiles",
+      )[0],
+    ).toEqual({
+      source: "10.0.0.1",
+      packets: 3,
+      unique_destinations: 2,
+      unique_destination_ports: 2,
+      unique_endpoints: 2,
+      tcp_syn_without_ack_packets: 2,
+      tcp_rst_packets: 1,
+    });
   });
 
   it("enforces byte and packet limits and rejects bad formats", () => {

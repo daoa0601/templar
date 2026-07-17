@@ -34,6 +34,32 @@ interface TcpRetransmission {
   readonly consumed: number;
 }
 
+type TransportProtocol = "tcp" | "udp";
+
+interface TransportConversationCount {
+  protocol: TransportProtocol;
+  source: string;
+  source_port: number;
+  destination: string;
+  destination_port: number;
+  packets: number;
+}
+
+interface DestinationPortCount {
+  protocol: TransportProtocol;
+  port: number;
+  packets: number;
+}
+
+interface MutableSourceProfile {
+  packets: number;
+  readonly destinations: Set<string>;
+  readonly destinationPorts: Set<string>;
+  readonly endpoints: Set<string>;
+  tcpSynWithoutAckPackets: number;
+  tcpRstPackets: number;
+}
+
 function invalid(message: string): TemplarError {
   return new TemplarError({ code: "PCAP_INVALID", message, status: 400 });
 }
@@ -52,11 +78,136 @@ function increment(map: Map<string, number>, key: string, amount = 1): void {
 
 function ranked(
   map: Map<string, number>,
+  limit = 10,
 ): ReadonlyArray<{ readonly key: string; readonly packets: number }> {
   return [...map.entries()]
     .map(([key, packets]) => ({ key, packets }))
     .sort((left, right) => right.packets - left.packets || left.key.localeCompare(right.key))
-    .slice(0, 10);
+    .slice(0, limit);
+}
+
+function recordTransport(
+  conversations: Map<string, TransportConversationCount>,
+  destinationPorts: Map<string, DestinationPortCount>,
+  sourceProfiles: Map<string, MutableSourceProfile>,
+  protocol: TransportProtocol,
+  source: string,
+  sourcePort: number,
+  destination: string,
+  destinationPort: number,
+  tcpFlags?: number,
+): void {
+  const conversationKey = [
+    protocol,
+    source,
+    String(sourcePort),
+    destination,
+    String(destinationPort),
+  ].join("\0");
+  const conversation = conversations.get(conversationKey);
+  if (conversation === undefined) {
+    conversations.set(conversationKey, {
+      protocol,
+      source,
+      source_port: sourcePort,
+      destination,
+      destination_port: destinationPort,
+      packets: 1,
+    });
+  } else {
+    conversation.packets += 1;
+  }
+
+  const destinationPortKey = `${protocol}:${destinationPort}`;
+  const portCount = destinationPorts.get(destinationPortKey);
+  if (portCount === undefined) {
+    destinationPorts.set(destinationPortKey, { protocol, port: destinationPort, packets: 1 });
+  } else {
+    portCount.packets += 1;
+  }
+
+  let sourceProfile = sourceProfiles.get(source);
+  if (sourceProfile === undefined) {
+    sourceProfile = {
+      packets: 0,
+      destinations: new Set<string>(),
+      destinationPorts: new Set<string>(),
+      endpoints: new Set<string>(),
+      tcpSynWithoutAckPackets: 0,
+      tcpRstPackets: 0,
+    };
+    sourceProfiles.set(source, sourceProfile);
+  }
+  sourceProfile.packets += 1;
+  sourceProfile.destinations.add(destination);
+  sourceProfile.destinationPorts.add(destinationPortKey);
+  sourceProfile.endpoints.add(`${protocol}:${destination}:${destinationPort}`);
+  if (tcpFlags !== undefined) {
+    if ((tcpFlags & 0x02) !== 0 && (tcpFlags & 0x10) === 0) {
+      sourceProfile.tcpSynWithoutAckPackets += 1;
+    }
+    if ((tcpFlags & 0x04) !== 0) sourceProfile.tcpRstPackets += 1;
+  }
+}
+
+function rankedTransportConversations(
+  conversations: Map<string, TransportConversationCount>,
+): ReadonlyArray<TransportConversationCount> {
+  return [...conversations.values()]
+    .sort(
+      (left, right) =>
+        right.packets - left.packets ||
+        left.protocol.localeCompare(right.protocol) ||
+        left.source.localeCompare(right.source) ||
+        left.source_port - right.source_port ||
+        left.destination.localeCompare(right.destination) ||
+        left.destination_port - right.destination_port,
+    )
+    .slice(0, 20)
+    .map((conversation) => ({ ...conversation }));
+}
+
+function rankedDestinationPorts(
+  destinationPorts: Map<string, DestinationPortCount>,
+): ReadonlyArray<DestinationPortCount> {
+  return [...destinationPorts.values()]
+    .sort(
+      (left, right) =>
+        right.packets - left.packets ||
+        left.protocol.localeCompare(right.protocol) ||
+        left.port - right.port,
+    )
+    .slice(0, 20)
+    .map((port) => ({ ...port }));
+}
+
+function rankedSourceProfiles(sourceProfiles: Map<string, MutableSourceProfile>): ReadonlyArray<{
+  readonly source: string;
+  readonly packets: number;
+  readonly unique_destinations: number;
+  readonly unique_destination_ports: number;
+  readonly unique_endpoints: number;
+  readonly tcp_syn_without_ack_packets: number;
+  readonly tcp_rst_packets: number;
+}> {
+  return [...sourceProfiles.entries()]
+    .map(([source, profile]) => ({
+      source,
+      packets: profile.packets,
+      unique_destinations: profile.destinations.size,
+      unique_destination_ports: profile.destinationPorts.size,
+      unique_endpoints: profile.endpoints.size,
+      tcp_syn_without_ack_packets: profile.tcpSynWithoutAckPackets,
+      tcp_rst_packets: profile.tcpRstPackets,
+    }))
+    .sort(
+      (left, right) =>
+        right.unique_endpoints - left.unique_endpoints ||
+        right.tcp_syn_without_ack_packets - left.tcp_syn_without_ack_packets ||
+        right.packets - left.packets ||
+        left.source.localeCompare(right.source),
+    )
+    .slice(0, 20);
 }
 
 function percentage(numerator: number, denominator: number): number {
@@ -75,6 +226,9 @@ export function analyzeClassicPcapBytes(
   const protocols = { ethernet: 0, ipv4: 0, ipv6: 0, arp: 0, tcp: 0, udp: 0, icmp: 0, other: 0 };
   const talkers = new Map<string, number>();
   const conversations = new Map<string, number>();
+  const transportConversations = new Map<string, TransportConversationCount>();
+  const destinationPorts = new Map<string, DestinationPortCount>();
+  const sourceProfiles = new Map<string, MutableSourceProfile>();
   const seenTcpRanges = new Set<string>();
   const retransmissions: Array<TcpRetransmission> = [];
   let tcpRst = 0;
@@ -166,6 +320,17 @@ export function analyzeClassicPcapBytes(
       if (tcpHeaderLength < 20 || transportOffset + tcpHeaderLength > ipEnd) continue;
       const flags = packet[transportOffset + 13]!;
       const window = packet.readUInt16BE(transportOffset + 14);
+      recordTransport(
+        transportConversations,
+        destinationPorts,
+        sourceProfiles,
+        "tcp",
+        source,
+        sourcePort,
+        destination,
+        destinationPort,
+        flags,
+      );
       if ((flags & 0x04) !== 0) tcpRst += 1;
       if (window === 0) tcpZeroWindow += 1;
       const payloadLength = Math.max(0, ipEnd - transportOffset - tcpHeaderLength);
@@ -200,6 +365,16 @@ export function analyzeClassicPcapBytes(
       if (ipEnd - transportOffset < 8) continue;
       const sourcePort = packet.readUInt16BE(transportOffset);
       const destinationPort = packet.readUInt16BE(transportOffset + 2);
+      recordTransport(
+        transportConversations,
+        destinationPorts,
+        sourceProfiles,
+        "udp",
+        source,
+        sourcePort,
+        destination,
+        destinationPort,
+      );
       const dnsOffset = transportOffset + 8;
       if ((sourcePort === 53 || destinationPort === 53) && ipEnd - dnsOffset >= 4) {
         const flagsValue = packet.readUInt16BE(dnsOffset + 2);
@@ -238,6 +413,21 @@ export function analyzeClassicPcapBytes(
         fact_id: "fact.ipv4.conversations",
         kind: "ipv4_conversations",
         value: ranked(conversations),
+      },
+      {
+        fact_id: "fact.transport.destination_ports",
+        kind: "transport_destination_ports",
+        value: rankedDestinationPorts(destinationPorts),
+      },
+      {
+        fact_id: "fact.transport.conversations",
+        kind: "transport_conversations",
+        value: rankedTransportConversations(transportConversations),
+      },
+      {
+        fact_id: "fact.transport.source_profiles",
+        kind: "transport_source_profiles",
+        value: rankedSourceProfiles(sourceProfiles),
       },
       {
         fact_id: "fact.tcp.flags",

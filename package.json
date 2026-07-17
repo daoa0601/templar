@@ -46,6 +46,7 @@
     "quality:quick": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm secrets:scan",
     "sample": "pnpm build && node --enable-source-maps dist/cli.js sample",
     "secrets:scan": "node scripts/quality/scan-secrets.mjs",
+    "smoke:ctu13": "pnpm build && node --enable-source-maps scripts/smoke/ctu13.mjs",
     "start": "node dist/cli.js serve",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

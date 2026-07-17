@@ -51,6 +51,8 @@ export function tcpPacket(options: {
   readonly payload?: string;
   readonly sourcePort?: number;
   readonly destinationPort?: number;
+  readonly source?: ReadonlyArray<number>;
+  readonly destination?: ReadonlyArray<number>;
 }): Buffer {
   const payload = Buffer.from(options.payload ?? "");
   const tcp = Buffer.alloc(20);
@@ -60,7 +62,12 @@ export function tcpPacket(options: {
   tcp[12] = 0x50;
   tcp[13] = options.flags;
   tcp.writeUInt16BE(options.window ?? 4096, 14);
-  return ethernetIpv4(6, Buffer.concat([tcp, payload]), [10, 0, 0, 1], [10, 0, 0, 2]);
+  return ethernetIpv4(
+    6,
+    Buffer.concat([tcp, payload]),
+    options.source ?? [10, 0, 0, 1],
+    options.destination ?? [10, 0, 0, 2],
+  );
 }
 
 export function dnsPacket(response: boolean): Buffer {

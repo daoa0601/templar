@@ -27,7 +27,7 @@ describe("Templar evidence model", () => {
     expect(pcapEvidence).toMatchObject({
       source_kind: "pcap_artifact",
       sha256: `sha256:${"a".repeat(64)}`,
-      parser_version: "classic-pcap-v1",
+      parser_version: "classic-pcap-v2",
       provenance: { digest_verified: true },
     });
     expect(built.bundle.findings[0]).toMatchObject({

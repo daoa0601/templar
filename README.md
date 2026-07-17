@@ -86,10 +86,17 @@ pnpm demo
 # This consumes subscription usage and is intentionally not part of tests.
 pnpm sample
 
+# Analyze two small CTU-13 security captures without invoking a model.
+pnpm smoke:ctu13
+
 # Run the compiled server.
 pnpm build
 pnpm start
 ```
+
+The smoke command downloads the captures into ignored local state under `.templar/smoke/ctu13` and
+prints the services, port-aware conversations, source fan-out, and TCP signals available to future
+security workflows.
 
 Configuration:
 
@@ -170,8 +177,9 @@ Rendered prose never becomes evidence. A ticket reference that was not retrieved
 gap. Packet parser failures and unavailable checks likewise cannot become a clean verdict.
 
 The classic-PCAP analyzer has stable facts for capture metadata, protocol counts, IPv4 talkers and
-conversations, TCP RST/zero-window events, payload/SYN/FIN sequence retransmissions, and DNS query
-versus response counts using the QR flag. Repeated pure ACKs consume no sequence space and are not
+conversations, destination services, port-aware transport conversations, source fan-out and TCP
+signals, TCP RST/zero-window events, payload/SYN/FIN sequence retransmissions, and DNS query versus
+response counts using the QR flag. Repeated pure ACKs consume no sequence space and are not
 retransmissions. Non-initial IPv4 fragments are not parsed as transport headers. DNS over TCP honors
 its two-byte message-length prefix.
 
