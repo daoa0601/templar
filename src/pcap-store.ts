@@ -1,6 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+import {
+  ContentAddressedFileStore,
+  ContentAddressedStoreError,
+  type VerifiedContent,
+} from "@agentic-orch/node-guardrails/cas";
 
 import { isPcapArtifactId } from "./contracts.js";
 import { TemplarError } from "./errors.js";
@@ -17,30 +21,26 @@ function invalidArtifact(message: string, cause?: unknown): TemplarError {
   return new TemplarError({ code: "PCAP_INVALID", message, status: 400, cause });
 }
 
-function within(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return (
-    relative.length > 0 &&
-    !relative.startsWith(`..${path.sep}`) &&
-    relative !== ".." &&
-    !path.isAbsolute(relative)
-  );
-}
-
 export class PcapArtifactStore {
   readonly root: string;
   readonly maxBytes: number;
+  readonly #files: ContentAddressedFileStore;
 
   constructor(root: string, maxBytes: number) {
     this.root = path.resolve(root);
     this.maxBytes = maxBytes;
+    this.#files = new ContentAddressedFileStore({
+      root: this.root,
+      maxBytes,
+      extension: ".pcap",
+    });
   }
 
   async initialize(): Promise<void> {
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    const info = await lstat(this.root);
-    if (!info.isDirectory() || info.isSymbolicLink()) {
-      throw invalidArtifact("Configured PCAP artifact root must be a real directory.");
+    try {
+      await this.#files.initialize();
+    } catch (cause) {
+      throw invalidArtifact("Configured PCAP artifact root must be a real directory.", cause);
     }
   }
 
@@ -53,59 +53,66 @@ export class PcapArtifactStore {
       });
     }
     inspectClassicPcapHeader(bytes);
-    await this.initialize();
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    const artifactId = `pcap_sha256_${digest}`;
-    const destination = path.join(this.root, `${digest}.pcap`);
-    const temporary = path.join(this.root, `.${digest}.${randomUUID()}.tmp`);
+    let stored;
     try {
-      await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
-      await rename(temporary, destination);
+      stored = await this.#files.stage(bytes);
     } catch (cause) {
-      await unlink(temporary).catch(() => undefined);
+      if (cause instanceof ContentAddressedStoreError && cause.kind === "content_too_large") {
+        throw new TemplarError({
+          code: "PCAP_LIMIT_EXCEEDED",
+          message: `PCAP exceeds the ${this.maxBytes}-byte upload limit.`,
+          status: 413,
+          cause,
+        });
+      }
       throw invalidArtifact("Unable to stage PCAP artifact.", cause);
     }
     return {
-      artifact_id: artifactId,
-      digest: `sha256:${digest}`,
-      size: bytes.byteLength,
+      artifact_id: `pcap_sha256_${stored.digest}`,
+      digest: `sha256:${stored.digest}`,
+      size: stored.size,
       media_type: "application/vnd.tcpdump.pcap",
     };
   }
 
-  async resolve(artifactId: string): Promise<string> {
+  async read(artifactId: string): Promise<Buffer> {
+    return (await this.#verified(artifactId)).bytes;
+  }
+
+  async #verified(artifactId: string): Promise<VerifiedContent> {
     if (!isPcapArtifactId(artifactId)) throw invalidArtifact("Invalid PCAP artifact ID.");
-    await this.initialize();
     const digest = artifactId.slice("pcap_sha256_".length);
-    const candidate = path.join(this.root, `${digest}.pcap`);
-    if (!within(this.root, candidate)) throw invalidArtifact("PCAP artifact escaped its root.");
-    let info;
+    let verified: VerifiedContent;
     try {
-      info = await lstat(candidate);
+      verified = await this.#files.read(digest);
     } catch (cause) {
-      throw new TemplarError({
-        code: "NOT_FOUND",
-        message: "PCAP artifact was not found.",
-        status: 404,
-        cause,
-      });
+      if (cause instanceof ContentAddressedStoreError) {
+        if (cause.kind === "not_found") {
+          throw new TemplarError({
+            code: "NOT_FOUND",
+            message: "PCAP artifact was not found.",
+            status: 404,
+            cause,
+          });
+        }
+        if (cause.kind === "content_too_large") {
+          throw new TemplarError({
+            code: "PCAP_LIMIT_EXCEEDED",
+            message: "Stored PCAP exceeds its configured byte cap.",
+            status: 400,
+            cause,
+          });
+        }
+        if (cause.kind === "invalid_file") {
+          throw invalidArtifact("PCAP artifact is not a regular file.", cause);
+        }
+        if (cause.kind === "digest_mismatch") {
+          throw invalidArtifact("PCAP artifact digest verification failed.", cause);
+        }
+      }
+      throw invalidArtifact("Unable to resolve PCAP artifact.", cause);
     }
-    if (!info.isFile() || info.isSymbolicLink())
-      throw invalidArtifact("PCAP artifact is not a regular file.");
-    if (info.size > this.maxBytes) {
-      throw new TemplarError({
-        code: "PCAP_LIMIT_EXCEEDED",
-        message: "Stored PCAP exceeds its configured byte cap.",
-        status: 400,
-      });
-    }
-    const rootReal = await realpath(this.root);
-    const candidateReal = await realpath(candidate);
-    if (!within(rootReal, candidateReal)) throw invalidArtifact("PCAP artifact escaped its root.");
-    const bytes = await readFile(candidateReal);
-    const observed = createHash("sha256").update(bytes).digest("hex");
-    if (observed !== digest) throw invalidArtifact("PCAP artifact digest verification failed.");
-    inspectClassicPcapHeader(bytes);
-    return candidateReal;
+    inspectClassicPcapHeader(verified.bytes);
+    return verified;
   }
 }

@@ -31,6 +31,8 @@
             <option value="telecom_incident">Telecom incident</option>
             <option value="pcap_security_triage">PCAP security triage</option>
             <option value="exercise_solve">Static exercise solver</option>
+            <option value="source_security_audit">Source security audit</option>
+            <option value="source_security_fix">Source security fix</option>
           </select>
           <label for="request">Incident description</label>
           <textarea
@@ -45,11 +47,23 @@
               maxlength="80"
               placeholder="exercise_sha256_…"
           /></label>
+          <label id="source-field" hidden
+            >Source snapshot ID<input
+              id="source-snapshot"
+              maxlength="78"
+              placeholder="source_sha256_…"
+          /></label>
+          <label id="source-audit-field" hidden
+            >Accepted source audit run ID<input
+              id="source-audit-run"
+              maxlength="128"
+              placeholder="run_…"
+          /></label>
           <div class="form-row">
             <label id="ticket-field"
               >Ticket reference<input id="ticket" maxlength="20" placeholder="NET-123"
             /></label>
-            <label
+            <label id="pcap-field"
               >Classic PCAP<input id="pcap" type="file" accept=".pcap,application/vnd.tcpdump.pcap"
             /></label>
           </div>
@@ -75,6 +89,7 @@
           </div>
           <div>
             <button id="acknowledge" class="secondary" hidden>Acknowledge promotion</button>
+            <button id="verify" class="secondary" hidden>Run Drone validation</button>
             <button id="cancel" class="danger" hidden>Cancel active run</button>
           </div>
         </div>

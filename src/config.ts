@@ -9,6 +9,7 @@ export interface TemplarConfig {
   readonly templarHome: string;
   readonly artifactRoot: string;
   readonly exerciseArtifactRoot: string;
+  readonly sourceArtifactRoot: string;
   readonly harnessHome: string;
   readonly bearerToken?: string;
   readonly maxActiveRuns: number;
@@ -16,9 +17,12 @@ export interface TemplarConfig {
   readonly maxPcapBytes: number;
   readonly maxPcapPackets: number;
   readonly maxExerciseSnapshotBytes: number;
-  readonly parallelsDesktopEnabled: boolean;
-  readonly parallelsCliPath: string;
-  readonly parallelsQuarantineRoot: string;
+  readonly maxSourceSnapshotBytes: number;
+  readonly droneEnabled: boolean;
+  readonly droneUrl: string;
+  readonly droneToken?: string;
+  readonly droneTimeoutMs: number;
+  readonly droneSourceValidationOperationId?: string;
 }
 
 function integer(value: string | undefined, fallback: number, label: string): number {
@@ -46,8 +50,20 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Templa
   const configuredHome = environment.TEMPLAR_HOME?.trim() || path.join(os.homedir(), ".templar");
   const templarHome = path.resolve(configuredHome);
   const token = environment.TEMPLAR_BEARER_TOKEN?.trim();
+  const droneToken = environment.TEMPLAR_DRONE_TOKEN?.trim();
+  const droneSourceValidationOperationId =
+    environment.TEMPLAR_DRONE_SOURCE_VALIDATION_OPERATION_ID?.trim();
   if (!isLoopbackHost(host) && !token) {
     throw invalidInput("TEMPLAR_BEARER_TOKEN is required when TEMPLAR_HOST is not loopback.");
+  }
+  if (
+    droneSourceValidationOperationId !== undefined &&
+    droneSourceValidationOperationId.length > 0 &&
+    !/^[a-z][a-z0-9_.-]{0,127}$/u.test(droneSourceValidationOperationId)
+  ) {
+    throw invalidInput(
+      "TEMPLAR_DRONE_SOURCE_VALIDATION_OPERATION_ID must be a safe Drone operation ID.",
+    );
   }
   return {
     host,
@@ -55,6 +71,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Templa
     templarHome,
     artifactRoot: path.join(templarHome, "artifacts", "pcap"),
     exerciseArtifactRoot: path.join(templarHome, "artifacts", "exercise"),
+    sourceArtifactRoot: path.join(templarHome, "artifacts", "source"),
     harnessHome: path.join(templarHome, "harness"),
     ...(token === undefined || token.length === 0 ? {} : { bearerToken: token }),
     maxActiveRuns: integer(environment.TEMPLAR_MAX_ACTIVE_RUNS, 2, "TEMPLAR_MAX_ACTIVE_RUNS"),
@@ -74,17 +91,22 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Templa
       512 * 1024,
       "TEMPLAR_MAX_EXERCISE_SNAPSHOT_BYTES",
     ),
-    parallelsDesktopEnabled: boolean(
-      environment.TEMPLAR_PARALLELS_DESKTOP_ENABLED,
-      false,
-      "TEMPLAR_PARALLELS_DESKTOP_ENABLED",
+    maxSourceSnapshotBytes: integer(
+      environment.TEMPLAR_MAX_SOURCE_SNAPSHOT_BYTES,
+      8 * 1024 * 1024,
+      "TEMPLAR_MAX_SOURCE_SNAPSHOT_BYTES",
     ),
-    parallelsCliPath: path.resolve(
-      environment.TEMPLAR_PARALLELS_CLI?.trim() || "/usr/local/bin/prlctl",
+    droneEnabled: boolean(environment.TEMPLAR_DRONE_ENABLED, true, "TEMPLAR_DRONE_ENABLED"),
+    droneUrl: environment.TEMPLAR_DRONE_URL?.trim() || "http://127.0.0.1:8090",
+    ...(droneToken === undefined || droneToken.length === 0 ? {} : { droneToken }),
+    droneTimeoutMs: integer(
+      environment.TEMPLAR_DRONE_TIMEOUT_MS,
+      1_000,
+      "TEMPLAR_DRONE_TIMEOUT_MS",
     ),
-    parallelsQuarantineRoot: path.resolve(
-      environment.TEMPLAR_PARALLELS_QUARANTINE_ROOT?.trim() ||
-        path.join(templarHome, "labs", "parallels"),
-    ),
+    ...(droneSourceValidationOperationId === undefined ||
+    droneSourceValidationOperationId.length === 0
+      ? {}
+      : { droneSourceValidationOperationId }),
   };
 }

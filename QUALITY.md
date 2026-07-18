@@ -10,7 +10,24 @@ pnpm install --frozen-lockfile
 pnpm hooks:install
 ```
 
-Use a supported Node.js release from `package.json`. CI and clean-room verification must always use `pnpm install --frozen-lockfile`.
+Use a supported Node.js release from `package.json`. A verified CI or clean-room run must use
+`pnpm install --frozen-lockfile`; with the current lock, that command also requires every sibling
+listed below.
+
+## Shared TypeScript policy
+
+Templar consumes the `workspace:*` `@agentic-orch/ts-quality` development package for the repository secret
+scan, package-manifest validation, managed Git-hook templates, strict Node.js TypeScript baseline,
+and Prettier defaults. The repository-level commands below remain stable; their shared mechanics
+delegate to `ts-quality` so fixes land once and are inherited on the next reviewed package update.
+
+The small `scripts/quality/require-pnpm.mjs` preinstall guard remains local by design: an external
+development dependency is not available yet when a clean install enters `preinstall`. Coverage
+floors, smoke suites, build behavior, and dependency policy remain owned by Templar.
+
+The expanded GitHub Actions jobs remain checked in because a relative reusable workflow cannot cross
+these independent Git repository boundaries. Templar-specific dependency setup, coverage, and
+integration jobs remain local.
 
 ## Gate ladder
 
@@ -24,17 +41,33 @@ Use a supported Node.js release from `package.json`. CI and clean-room verificat
 
 Coverage is measured over all `src/**/*.ts` files, including currently untested entrypoints. The enforced global floor is 75% statements, 68% branches, 82% functions, and 78% lines. Raising a floor is welcome; lowering one requires an explicit rationale.
 
-`pnpm hooks:install` configures this checkout to use the committed hooks:
+`pnpm hooks:install` installs the package-owned managed hooks into this checkout's active Git hooks
+directory:
 
 - pre-commit runs `pnpm quality:quick`;
 - pre-push runs `pnpm quality:offline`.
 
-The hooks are a fast local feedback layer, not the source of truth. Automation should repeat the frozen install and `pnpm preflight`.
+The hooks are a fast local feedback layer, not the source of truth. Automation should repeat the
+frozen install and `pnpm preflight`.
 
-Templar CI checks out a pinned sibling-harness commit from
-`<repository owner>/aiur-orchestrator`, builds it, and then installs Templar. Publish that
-repository before enabling Templar's branch-protection rule; the checkout intentionally fails closed
-when the required runtime dependency is unavailable.
+## Local sibling-lock and CI status
+
+The manifest contains `workspace:*` dependencies and the current lock resolves four sibling modules:
+
+| Sibling                         | Current role                                                      |
+| ------------------------------- | ----------------------------------------------------------------- |
+| `@agentic-orch/agent-blocks`    | Runtime orchestration and public control-plane contracts.         |
+| `@agentic-orch/drone-client`    | Public Drone v1 contracts and hardened bounded HTTP client.       |
+| `@agentic-orch/node-guardrails` | Neutral bounded HTTP and verified content-addressed byte storage. |
+| `@agentic-orch/ts-quality`      | Development-only repository checks and shared configuration.      |
+
+Every `pnpm install --frozen-lockfile` therefore requires all four checkouts at the relative
+paths in `pnpm-workspace.yaml`. The checked-in workflow checks out Templar and a pinned Agent Blocks commit
+only; it does not check out Drone client, node-guardrails, or ts-quality (and Agent Blocks's own sibling links
+also need their packages). The current workflow and lock are consequently non-standalone and cannot
+serve as coordinated evidence. Local validation must recreate all four sibling paths, build Agent
+Blocks, and then run Templar's frozen install and gates. This is the intended informal-project
+topology; npm publication is not part of the plan.
 
 ## Dependency and supply-chain policy
 
@@ -52,4 +85,8 @@ Only `esbuild` is approved to execute a third-party install script. Optional nat
 
 ## Secret scan scope
 
-The local scanner examines tracked and unignored files for secret-bearing filenames, private keys, common provider token formats, and non-placeholder secret assignments in configuration files. It reports only file and line metadata, never the matched value. This supplements host and repository secret-scanning controls; it does not replace them.
+The shared scanner examines staged Git blobs, their current working-tree copies, and unignored
+untracked files for secret-bearing filenames, private keys, common provider token formats, and
+non-placeholder secret assignments in configuration files. It never follows symlinks, bounds file
+reads, and reports only escaped file and line metadata—never the matched value. This supplements
+host and repository secret-scanning controls; it does not replace them.

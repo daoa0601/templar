@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { readRunEventRecords } from "aiur-orchestrator";
+import { readRunEventRecords } from "@agentic-orch/agent-blocks/persistence";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 

@@ -1,4 +1,5 @@
-import { readFile, symlink, unlink } from "node:fs/promises";
+import { readFile, symlink, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -14,6 +15,10 @@ import {
 } from "./helpers.js";
 
 const limits = { maxBytes: 1024 * 1024, maxPackets: 100 };
+
+function storedPcapPath(root: string, artifactId: string): string {
+  return path.join(root, `${artifactId.slice("pcap_sha256_".length)}.pcap`);
+}
 
 function fact<T = Record<string, number>>(
   analysis: ReturnType<typeof analyzeClassicPcapBytes>,
@@ -181,15 +186,33 @@ describe("bounded classic-PCAP analysis", () => {
     ).toThrow(/pcapng/u);
   });
 
-  it("stages by digest and rejects symlink resolution", async () => {
+  it("uses verified bytes and rejects replacement and symbolic-link resolution", async () => {
     const root = await temporaryDirectory("templar-pcap-");
     const store = new PcapArtifactStore(root, limits.maxBytes);
     const capture = classicPcap([]);
     const stored = await store.stage(capture);
-    const resolved = await store.resolve(stored.artifact_id);
-    expect(await readFile(resolved)).toEqual(capture);
-    await unlink(resolved);
-    await symlink("/dev/null", resolved);
-    await expect(store.resolve(stored.artifact_id)).rejects.toThrow(/regular file/u);
+    const verified = await store.read(stored.artifact_id);
+    expect(verified).toEqual(capture);
+    const candidate = storedPcapPath(root, stored.artifact_id);
+    expect(await readFile(candidate)).toEqual(capture);
+    await unlink(candidate);
+    await symlink("/dev/null", candidate);
+    expect(verified).toEqual(capture);
+    await expect(store.read(stored.artifact_id)).rejects.toMatchObject({
+      code: "PCAP_INVALID",
+      status: 400,
+    });
+  });
+
+  it("bounds stored PCAP reads before analysis", async () => {
+    const root = await temporaryDirectory("templar-pcap-bounded-");
+    const store = new PcapArtifactStore(root, 64);
+    const stored = await store.stage(classicPcap([]));
+    await writeFile(storedPcapPath(root, stored.artifact_id), Buffer.alloc(65), { mode: 0o600 });
+
+    await expect(store.read(stored.artifact_id)).rejects.toMatchObject({
+      code: "PCAP_LIMIT_EXCEEDED",
+      status: 400,
+    });
   });
 });

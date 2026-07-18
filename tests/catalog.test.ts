@@ -52,9 +52,29 @@ describe("Templar workflow capability gates", () => {
       networkMode: "denied",
       traceAuditorRequired: false,
     });
+    expect(workflowEntry("source_security_audit")).toMatchObject({
+      releaseState: "enabled",
+      family: "blue_team",
+      requiredCapability: "RE_STATIC",
+      networkMode: "denied",
+      traceAuditorRequired: true,
+    });
+    expect(workflowEntry("source_security_fix")).toMatchObject({
+      releaseState: "enabled",
+      family: "blue_team",
+      requiredCapability: "RE_STATIC",
+      networkMode: "denied",
+      traceAuditorRequired: true,
+    });
     expect(
       WORKFLOW_CATALOG.filter((entry) => entry.enabledByDefault).map((entry) => entry.id),
-    ).toEqual(["telecom_incident", "pcap_security_triage", "exercise_solve"]);
+    ).toEqual([
+      "telecom_incident",
+      "pcap_security_triage",
+      "exercise_solve",
+      "source_security_audit",
+      "source_security_fix",
+    ]);
     expect(WORKFLOW_CATALOG.map((entry) => entry.id)).toEqual(
       expect.arrayContaining([
         "case.authorize",

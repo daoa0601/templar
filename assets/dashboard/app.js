@@ -1,4 +1,4 @@
-const state = { selected: null, after: 0, timer: null };
+const state = { selected: null, selectedWorkflow: null, after: 0, timer: null };
 const token = document.querySelector("#token");
 const workflow = document.querySelector("#workflow");
 token.value = sessionStorage.getItem("templar-token") ?? "";
@@ -9,7 +9,11 @@ async function api(url, options = {}) {
   if (token.value) headers.set("Authorization", `Bearer ${token.value}`);
   const response = await fetch(url, { ...options, headers });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message ?? `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(data.error?.message ?? `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -44,6 +48,7 @@ async function selectRun(runId) {
 async function refreshDetail() {
   if (!state.selected) return;
   const run = await api(`/api/runs/${encodeURIComponent(state.selected)}`);
+  state.selectedWorkflow = run.workflow ?? null;
   document.querySelector("#detail-title").textContent = run.runId;
   const summary = document.querySelector("#run-summary");
   summary.innerHTML = [
@@ -72,12 +77,23 @@ async function refreshDetail() {
     const output = await api(`/api/runs/${encodeURIComponent(state.selected)}/result`);
     const promotion = output.promotion;
     const evaluation = output.evaluation;
+    let verification = null;
+    if (run.workflow === "source_security_fix") {
+      try {
+        verification = await api(`/api/runs/${encodeURIComponent(state.selected)}/verification`);
+      } catch (error) {
+        if (error.status !== 404 && error.status !== 503) throw error;
+      }
+    }
     document.querySelector("#acknowledge").hidden =
       !promotion.requiresHumanAcknowledgment || promotion.acknowledged;
+    document.querySelector("#verify").hidden =
+      run.workflow !== "source_security_fix" || !promotion.acknowledged || verification !== null;
     document.querySelector("#final-output").innerHTML =
-      `<h3>Accepted result</h3><pre>${escapeHtml(JSON.stringify(output.result, null, 2))}</pre><h3>Evaluation</h3><pre>${escapeHtml(JSON.stringify(evaluation, null, 2))}</pre><h3>Promotion gate</h3><pre>${escapeHtml(JSON.stringify(promotion, null, 2))}</pre><h3>Report</h3><pre>${escapeHtml(output.report)}</pre>`;
+      `<h3>Accepted result</h3><pre>${escapeHtml(JSON.stringify(output.result, null, 2))}</pre><h3>Evaluation</h3><pre>${escapeHtml(JSON.stringify(evaluation, null, 2))}</pre><h3>Promotion gate</h3><pre>${escapeHtml(JSON.stringify(promotion, null, 2))}</pre>${verification === null ? "" : `<h3>Drone validation</h3><pre>${escapeHtml(JSON.stringify(verification, null, 2))}</pre>`}<h3>Report</h3><pre>${escapeHtml(output.report)}</pre>`;
   } else {
     document.querySelector("#acknowledge").hidden = true;
+    document.querySelector("#verify").hidden = true;
   }
 }
 
@@ -89,23 +105,35 @@ document.querySelector("#incident-form").addEventListener("submit", async (event
     const file = document.querySelector("#pcap").files[0];
     const securityTriage = workflow.value === "pcap_security_triage";
     const exerciseSolve = workflow.value === "exercise_solve";
+    const sourceAudit = workflow.value === "source_security_audit";
+    const sourceFix = workflow.value === "source_security_fix";
     if (securityTriage && !file) throw new Error("PCAP security triage requires a capture.");
     let artifact;
-    if (file && !exerciseSolve)
+    if (file && !exerciseSolve && !sourceAudit && !sourceFix)
       artifact = await api("/api/artifacts/pcap", {
         method: "POST",
         headers: { "Content-Type": "application/vnd.tcpdump.pcap" },
         body: file,
       });
-    const body = exerciseSolve
+    const body = sourceFix
       ? {
           schema_version: "1",
-          exercise_snapshot_id: document.querySelector("#exercise-snapshot").value.trim(),
+          audit_run_id: document.querySelector("#source-audit-run").value.trim(),
         }
-      : securityTriage
-        ? { schema_version: "1", pcap_artifact_id: artifact.artifact_id }
-        : { schema_version: "1", request: document.querySelector("#request").value };
-    if (!securityTriage && !exerciseSolve) {
+      : sourceAudit
+        ? {
+            schema_version: "1",
+            source_snapshot_id: document.querySelector("#source-snapshot").value.trim(),
+          }
+        : exerciseSolve
+          ? {
+              schema_version: "1",
+              exercise_snapshot_id: document.querySelector("#exercise-snapshot").value.trim(),
+            }
+          : securityTriage
+            ? { schema_version: "1", pcap_artifact_id: artifact.artifact_id }
+            : { schema_version: "1", request: document.querySelector("#request").value };
+    if (!securityTriage && !exerciseSolve && !sourceAudit && !sourceFix) {
       const ticket = document.querySelector("#ticket").value.trim();
       if (ticket) body.ticket_ref = ticket;
       if (artifact) body.pcap_artifact_id = artifact.artifact_id;
@@ -125,17 +153,31 @@ document.querySelector("#incident-form").addEventListener("submit", async (event
 workflow.addEventListener("change", () => {
   const securityTriage = workflow.value === "pcap_security_triage";
   const exerciseSolve = workflow.value === "exercise_solve";
-  document.querySelector("#request").disabled = securityTriage || exerciseSolve;
-  document.querySelector("#request").required = !securityTriage && !exerciseSolve;
-  document.querySelector("#ticket-field").hidden = securityTriage || exerciseSolve;
+  const sourceAudit = workflow.value === "source_security_audit";
+  const sourceFix = workflow.value === "source_security_fix";
+  document.querySelector("#request").disabled =
+    securityTriage || exerciseSolve || sourceAudit || sourceFix;
+  document.querySelector("#request").required =
+    !securityTriage && !exerciseSolve && !sourceAudit && !sourceFix;
+  document.querySelector("#ticket-field").hidden =
+    securityTriage || exerciseSolve || sourceAudit || sourceFix;
   document.querySelector("#exercise-field").hidden = !exerciseSolve;
   document.querySelector("#exercise-snapshot").required = exerciseSolve;
-  document.querySelector("#pcap").disabled = exerciseSolve;
-  document.querySelector("#workflow-description").textContent = exerciseSolve
-    ? "Solve a bounded static-analysis exercise from an opaque evidence snapshot."
-    : securityTriage
-      ? "Passively triage one locally staged classic PCAP through scoped Aiur agents."
-      : "Investigate a bounded telecom incident.";
+  document.querySelector("#source-field").hidden = !sourceAudit;
+  document.querySelector("#source-snapshot").required = sourceAudit;
+  document.querySelector("#source-audit-field").hidden = !sourceFix;
+  document.querySelector("#source-audit-run").required = sourceFix;
+  document.querySelector("#pcap-field").hidden = exerciseSolve || sourceAudit || sourceFix;
+  document.querySelector("#pcap").disabled = exerciseSolve || sourceAudit || sourceFix;
+  document.querySelector("#workflow-description").textContent = sourceFix
+    ? "Create isolated patch candidates and regressions for one accepted source audit."
+    : sourceAudit
+      ? "Audit a bounded source snapshot through recon, scoped hunts, and adversarial falsification."
+      : exerciseSolve
+        ? "Solve a bounded static-analysis exercise from an opaque evidence snapshot."
+        : securityTriage
+          ? "Passively triage one locally staged classic PCAP through scoped Agent Blocks agents."
+          : "Investigate a bounded telecom incident.";
 });
 document
   .querySelector("#refresh")
@@ -154,6 +196,18 @@ document.querySelector("#acknowledge").addEventListener("click", async () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rationale }),
+    });
+    await refreshDetail();
+  }
+});
+document.querySelector("#verify").addEventListener("click", async () => {
+  if (!state.selected || state.selectedWorkflow !== "source_security_fix") return;
+  const rationale = window.prompt("Why should this accepted fix run in the configured Drone lab?");
+  if (rationale) {
+    await api(`/api/runs/${encodeURIComponent(state.selected)}/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ schema_version: "1", rationale }),
     });
     await refreshDetail();
   }

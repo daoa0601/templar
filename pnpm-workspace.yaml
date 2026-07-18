@@ -1,5 +1,12 @@
 packages:
   - "."
+  - "../agent-blocks"
+  - "../drone-client"
+  - "../node-guardrails"
+  - "../ts-quality"
+
+linkWorkspacePackages: true
+sharedWorkspaceLockfile: false
 
 auditLevel: high
 blockExoticSubdeps: true
@@ -15,6 +22,7 @@ strictPeerDependencies: true
 verifyDepsBeforeRun: error
 
 allowBuilds:
-  aiur-orchestrator@file:../aiur-orchestrator: true
+  "@agentic-orch/agent-blocks": true
+  "@agentic-orch/ts-quality": true
   esbuild: true
   msgpackr-extract: false
