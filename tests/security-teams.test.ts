@@ -2,6 +2,7 @@ import { agentBlockAssignments, defineAgentOrganization } from "@agentic-orch/ag
 import { describe, expect, it } from "vitest";
 
 import {
+  COURSE_SECURITY_EVALUATION_TEAM_PLAN,
   PCAP_SECURITY_TRIAGE_TEAM_PLAN,
   rolesForSecurityTeamPlan,
   SECURITY_TEAM_IDS,
@@ -12,6 +13,7 @@ import {
 } from "../src/security-teams.js";
 import type { SecurityRoleBlock, SecurityTeamPlan } from "../src/security-teams.js";
 import {
+  courseSecurityEvaluationWorkflow,
   pcapSecurityTriageWorkflow,
   sourceSecurityAuditWorkflow,
   sourceSecurityFixWorkflow,
@@ -114,15 +116,56 @@ describe("Templar security team composition", () => {
       root: "/fix",
       evaluatorPath: "/fix/evaluate.mjs",
     } as SourceSecurityFixWorkspace);
+    const course = courseSecurityEvaluationWorkflow({
+      root: "/course",
+      evaluatorPath: "/course/evaluate.mjs",
+    } as Parameters<typeof courseSecurityEvaluationWorkflow>[0]);
 
     expect(pcap.roles).toEqual(rolesForSecurityTeamPlan(PCAP_SECURITY_TRIAGE_TEAM_PLAN));
     expect(audit.roles).toEqual(rolesForSecurityTeamPlan(SOURCE_SECURITY_AUDIT_TEAM_PLAN));
     expect(fix.roles).toEqual(rolesForSecurityTeamPlan(SOURCE_SECURITY_FIX_TEAM_PLAN));
+    expect(course.roles).toEqual(rolesForSecurityTeamPlan(COURSE_SECURITY_EVALUATION_TEAM_PLAN));
     expect(pcap.supervisor.instructions).toContain("research_once");
     expect(audit.supervisor.instructions).toContain("authorization_once");
     expect(fix.supervisor.instructions).toContain("audit_b to candidate_b");
+    expect(course.supervisor.instructions).toContain("windows_intrusion_once");
     expect(rolesForSecurityTeamPlan(SOURCE_SECURITY_AUDIT_TEAM_PLAN)).toHaveLength(6);
     expect(rolesForSecurityTeamPlan(SOURCE_SECURITY_FIX_TEAM_PLAN)).toHaveLength(3);
+    expect(rolesForSecurityTeamPlan(COURSE_SECURITY_EVALUATION_TEAM_PLAN)).toHaveLength(7);
+
+    const pinnedCourse = courseSecurityEvaluationWorkflow(
+      {
+        root: "/course",
+        evaluatorPath: "/course/evaluate.mjs",
+      } as Parameters<typeof courseSecurityEvaluationWorkflow>[0],
+      { model: "gpt-5.6-sol" },
+    );
+    expect(pinnedCourse.supervisor.model).toBe("gpt-5.6-sol");
+    expect(pinnedCourse.roles.every((role) => role.model === "gpt-5.6-sol")).toBe(true);
+  });
+
+  it("owns each whole-course block in a concrete specialist or assurance member", () => {
+    const assignments = agentBlockAssignments(COURSE_SECURITY_EVALUATION_TEAM_PLAN);
+    expect(assignments).toHaveLength(9);
+    expect(assignments.map(({ teamId }) => teamId)).toEqual([
+      "purple_team",
+      "red_team",
+      "red_team",
+      "reverse_engineering_team",
+      "reverse_engineering_team",
+      "blue_team",
+      "blue_team",
+      "assurance_team",
+      "assurance_team",
+    ]);
+    expect(
+      assignments
+        .filter(({ block }) => block.role.kind === "review")
+        .map(({ block }) => [block.agentId, block.targetCandidateId]),
+    ).toEqual([
+      ["audit_a", "candidate_a"],
+      ["audit_b", "candidate_b"],
+    ]);
   });
 
   it("publishes the complete team vocabulary and plan lookup", () => {
@@ -135,6 +178,9 @@ describe("Templar security team composition", () => {
       "network_analysis_team",
     ]);
     expect(securityTeamPlan("pcap_security_triage")).toBe(PCAP_SECURITY_TRIAGE_TEAM_PLAN);
+    expect(securityTeamPlan("course_security_evaluation")).toBe(
+      COURSE_SECURITY_EVALUATION_TEAM_PLAN,
+    );
     expect(
       securityRoleAssignment(SOURCE_SECURITY_FIX_TEAM_PLAN, "source_fix_audit_a").block,
     ).toMatchObject({

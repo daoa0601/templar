@@ -41,6 +41,12 @@ integration jobs remain local.
 
 Coverage is measured over all `src/**/*.ts` files, including currently untested entrypoints. The enforced global floor is 75% statements, 68% branches, 82% functions, and 78% lines. Raising a floor is welcome; lowering one requires an explicit rationale.
 
+The deterministic suite exercises the whole-course workflow with a scripted runtime and validates
+the versioned five-assignment/33-requirement corpus, analyzers, evidence composition, sealed-grader
+contract, security-team guard, and candidate evaluator. Real Codex and OpenCode model runs are
+opt-in evaluations: they consume external subscription/provider usage, may take up to the declared
+one-hour course budget, and are never part of CI or `pnpm preflight`.
+
 `pnpm hooks:install` installs the package-owned managed hooks into this checkout's active Git hooks
 directory:
 

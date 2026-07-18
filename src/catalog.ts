@@ -80,6 +80,14 @@ const EXERCISE_SOLVE_BUDGET: WorkflowBudgets = {
   maxTokens: 300_000,
 };
 
+const COURSE_SECURITY_EVALUATION_BUDGET: WorkflowBudgets = {
+  wallClockSeconds: 3_600,
+  maxTurns: 9,
+  maxTokens: 1_500_000,
+  maxConcurrency: 4,
+  maxOutputBytes: 12 * 1024 * 1024,
+};
+
 const SOURCE_SECURITY_AUDIT_BUDGET: WorkflowBudgets = {
   wallClockSeconds: 1_200,
   maxTurns: 8,
@@ -200,6 +208,27 @@ export const WORKFLOW_CATALOG: ReadonlyArray<WorkflowCatalogEntry> = [
     traceAuditorRequired: false,
     persistencePolicy: "bounded_case_record",
     dataSensitivityPolicy: "operational",
+    releaseState: "enabled",
+  }),
+  entry({
+    id: "course_security_evaluation",
+    version: "1.0.0",
+    family: "reverse_engineering",
+    description:
+      "Whole-corpus passive security analysis with scoped specialists, independent solutions, and assurance.",
+    agentOrganizationId: "course_security_evaluation",
+    inputSchemaId: "templar://exercise_solve/ExerciseSolveInput/v1",
+    outputSchemaId: "templar://exercise_solve/ExerciseCandidateResult/v1",
+    requiredCapability: "RE_STATIC",
+    authorizationCheckpoint: "versioned_local_course_corpus_scope",
+    networkMode: "denied",
+    filesystemMode: "isolated_candidate_worktree",
+    toolAllowlist: [],
+    budgets: COURSE_SECURITY_EVALUATION_BUDGET,
+    evaluatorRequired: true,
+    traceAuditorRequired: true,
+    persistencePolicy: "bounded_case_record",
+    dataSensitivityPolicy: "sensitive_quarantine",
     releaseState: "enabled",
   }),
   entry({

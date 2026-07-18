@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { SecurityTeamRuntime, securityTeamPhases } from "../src/security-team-guard.js";
 import {
+  COURSE_SECURITY_EVALUATION_TEAM_PLAN,
   PCAP_SECURITY_TRIAGE_TEAM_PLAN,
   SOURCE_SECURITY_AUDIT_TEAM_PLAN,
 } from "../src/security-teams.js";
@@ -297,5 +298,16 @@ describe("Templar security-team runtime guard", () => {
     expect(securityTeamPhases(SOURCE_SECURITY_AUDIT_TEAM_PLAN).map((phase) => phase.phase)).toEqual(
       [1, 2, 3, 4],
     );
+    expect(
+      securityTeamPhases(COURSE_SECURITY_EVALUATION_TEAM_PLAN).map((phase) => [
+        phase.phase,
+        phase.assignments.length,
+      ]),
+    ).toEqual([
+      [1, 1],
+      [2, 4],
+      [3, 2],
+      [4, 2],
+    ]);
   });
 });

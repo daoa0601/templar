@@ -1,11 +1,12 @@
 # Templar
 
 Templar is a local, policy-gated network and security analysis application built on the sibling
-`@agentic-orch/agent-blocks` package. It ships five workflows: `telecom_incident` for bounded packet-loss
+`@agentic-orch/agent-blocks` package. It ships six workflows: `telecom_incident` for bounded packet-loss
 diagnosis, `pcap_security_triage` for passive analysis of a locally staged classic PCAP,
-`exercise_solve` for bounded reverse-engineering exercises, `source_security_audit` for
+`exercise_solve` for bounded reverse-engineering exercises, `course_security_evaluation` for the
+complete versioned course corpus, `source_security_audit` for
 attacker-oriented static source review, and `source_security_fix` for isolated patch and regression
-test candidates derived from an accepted audit. All five use explicit Agent Blocks roles, isolated candidate
+test candidates derived from an accepted audit. All six use explicit Agent Blocks roles, isolated candidate
 worktrees, a local evaluator, and mechanical candidate selection.
 
 Templar is a single-user local system, not a production or multi-tenant security boundary.
@@ -32,8 +33,9 @@ The harness owns role scope, worktree isolation, lifecycle, budgets, concurrency
 evaluation snapshots, durable events, and patch application. Templar does not recreate an agent loop.
 The dashboard is a thin client of the Templar API and is never authoritative run state.
 
-The default runtime is the locally installed Codex CLI authenticated through ChatGPT. Templar does
-not need or read an OpenAI API key:
+The default runtime is the locally installed Codex CLI authenticated through ChatGPT. Whole-course
+runs can instead use the local OpenCode CLI with an explicitly qualified provider/model such as
+`zai-coding-plan/glm-5.2`. Templar does not need or read an OpenAI API key or provider credential:
 
 ```bash
 codex login
@@ -49,6 +51,7 @@ codex login status
 - Sibling checkouts at `../drone-client`, `../node-guardrails`, and `../ts-quality` for the current
   frozen install
 - A locally authenticated `codex` CLI for real agent runs
+- Optionally, a locally authenticated `opencode` CLI for an alternate provider runtime
 
 ```bash
 cd templar
@@ -119,6 +122,14 @@ pnpm smoke:course-static
 # This consumes ChatGPT subscription usage.
 pnpm smoke:course-static:real
 
+# Inspect, compose, solve, and privately grade the complete course corpus.
+# See docs/course-evaluation.md for the evidence and security requirements.
+node dist/cli.js course inventory /path/to/course-material
+node dist/cli.js course compose /path/to/course-material /private/evidence.json /private/snapshot.json
+node dist/cli.js course solve /private/snapshot.json --runtime codex --model gpt-5.6-sol
+node dist/cli.js course solve /private/snapshot.json --runtime opencode --model zai-coding-plan/glm-5.2
+node dist/cli.js course grade /private/result.json /private/sealed-rubric.json
+
 # Run the compiled server.
 pnpm build
 pnpm start
@@ -147,6 +158,10 @@ Configuration:
 | `TEMPLAR_DRONE_TOKEN`                          |                   unset | Optional bearer token for Drone.                             |
 | `TEMPLAR_DRONE_TIMEOUT_MS`                     |                  `1000` | Bound for Drone control-plane requests.                      |
 | `TEMPLAR_DRONE_SOURCE_VALIDATION_OPERATION_ID` |                   unset | Registered operation used for accepted-fix replay.           |
+| `TEMPLAR_COURSE_MATERIAL`                      |                   unset | Optional private course root for inventory/compose.          |
+| `TEMPLAR_COURSE_RUNTIME`                       |                 `codex` | Course CLI runtime: `codex` or `opencode`.                   |
+| `TEMPLAR_COURSE_MODEL`                         |         runtime default | Operator-selected course model; never caller-controlled.     |
+| `TEMPLAR_OPENCODE_BINARY`                      |              `opencode` | Trusted local OpenCode executable for course CLI runs.       |
 
 Callers cannot choose a workspace, evaluator command, Codex setting, executable, budget, URL, or host
 path through incident input.
@@ -324,8 +339,8 @@ data sensitivity, and release state.
 | `RE_DYNAMIC_LAB`   | Requires an attested disposable lab, simulated/allowlisted network, quarantine, timeout, rollback, logging, emergency stop, and human approval.                                                       |
 | `ACTIVE_TEST`      | Disabled by default; requires verified current written ROE, exact target/method allowlists, exclusions, legal grantor, emergency contact, kill switch, lab attestation, and immediate human approval. |
 
-`telecom_incident`, `pcap_security_triage`, `exercise_solve`, `source_security_audit`, and
-`source_security_fix` are enabled. Other
+`telecom_incident`, `pcap_security_triage`, `exercise_solve`, `course_security_evaluation`,
+`source_security_audit`, and `source_security_fix` are enabled. Other
 authorization/evidence/DFIR/static-analysis/intelligence/detection/advisory/planning entries remain
 `planned`. Dynamic observation, debugging, .NET runtime work, and C2 emulation are `requires_lab`.
 `redteam.exercise` is `disabled`. Capabilities are non-transitive: defensive intent does not grant
@@ -383,6 +398,12 @@ assurance members. The exported vocabulary also reserves reverse-engineering and
 teams for future plans. Public composition lives in `src/security-teams.ts`; active testing remains
 disabled unless the separate rules-of-engagement, lab, and human-approval gates all pass.
 
+The whole-course roster uses one purple-team evidence coordinator; Windows intrusion and native
+reverse-engineering red-team specialists; managed and batch reverse-engineering specialists; two
+independent blue-team whole-corpus solvers; and two pinned assurance auditors. Its five phases cover
+all 33 requirements. See [the course evaluation guide](docs/course-evaluation.md) for commands,
+runtime authentication, private grading, and containment boundaries.
+
 ## Evaluation and promotion
 
 `telecom_incident` retains its four-round researcher/candidate/reviewer flow. Security triage is
@@ -390,6 +411,12 @@ deliberately leaner: one read-only researcher, two isolated analysts, then deter
 three rounds and three agent turns. Exercise solving uses the same three-turn shape with one
 question-to-evidence researcher and two independent solvers. Neither workflow adds an audit-agent
 round.
+
+Whole-course evaluation uses five rounds and nine agent turns: evidence coordination, four parallel
+scoped specialists, two independent solvers, two candidate-pinned auditors, and deterministic
+selection. The course artifact and sealed rubric never enter an agent worktree. Agents see only the
+strict content-addressed evidence snapshot, while real Codex/OpenCode runs remain operator-only and
+opt-in.
 
 Source audit uses five rounds: one complete attack-surface recon, three parallel hunt tracks
 (injection, navigation/boundaries, and authorization/state/resources), two independent falsifiers,
@@ -466,8 +493,8 @@ gates.
 
 Tests generate tiny classic-PCAP, exercise, and source fixtures in code. They cover strict schemas;
 URL/path/symlink rejection; artifact byte and packet limits; packet parsing; policy boundaries;
-workspace initialization; evaluator contracts; deterministic selection; all five complete harness
+workspace initialization; evaluator contracts; deterministic selection; all six complete harness
 workflows with an injected scripted runtime; isolated source fixes and explicit Drone replay; HTTP
 routing; Drone fail-closed handling; dashboard
-boundaries; and immutable acknowledgment. No test invokes Codex or consumes ChatGPT subscription
-usage.
+boundaries; and immutable acknowledgment. No test invokes Codex or OpenCode or consumes external
+model-provider usage.

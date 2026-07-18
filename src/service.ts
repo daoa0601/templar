@@ -29,6 +29,8 @@ import type { Fiber as EffectFiber } from "effect/Fiber";
 
 import type { TemplarConfig } from "./config.js";
 import { requiresHumanAcknowledgment, workflowEntry } from "./catalog.js";
+import { assertCourseExerciseSnapshot, isCourseExerciseSnapshot } from "./course-evidence.js";
+import { loadCourseCorpusManifest } from "./course-corpus.js";
 import type {
   ExerciseSolveInput,
   IncidentInput,
@@ -56,6 +58,7 @@ import {
   validationRationale,
 } from "./source-validation.js";
 import {
+  courseSecurityEvaluationWorkflow,
   exerciseSolveWorkflow,
   pcapSecurityTriageWorkflow,
   sourceSecurityAuditWorkflow,
@@ -154,6 +157,7 @@ export class TemplarService {
   readonly sources: SourceSnapshotStore;
   readonly #runtimeFactory:
     ((runId: string, workflowId: string) => AgentRuntime | undefined) | undefined;
+  readonly #courseModel: string | undefined;
   readonly #drone: TemplarDroneClient;
   readonly #active = new Map<string, RunFiber>();
   readonly #validationSubmissions = new Map<string, Promise<SourceFixValidationView>>();
@@ -164,6 +168,7 @@ export class TemplarService {
     options: {
       readonly runtimeFactory?: (runId: string, workflowId: string) => AgentRuntime | undefined;
       readonly droneClient?: TemplarDroneClient;
+      readonly courseModel?: string;
     } = {},
   ) {
     this.config = config;
@@ -177,6 +182,7 @@ export class TemplarService {
       config.maxSourceSnapshotBytes,
     );
     this.#runtimeFactory = options.runtimeFactory;
+    this.#courseModel = options.courseModel;
     this.#drone =
       options.droneClient ??
       new DroneClient({
@@ -261,14 +267,24 @@ export class TemplarService {
   async submitExerciseSolve(input: ExerciseSolveInput): Promise<SubmitResult> {
     return this.#submit(async (runId) => {
       const snapshot = await this.exercises.resolve(input.exercise_snapshot_id);
+      const course = isCourseExerciseSnapshot(snapshot);
+      if (course) {
+        assertCourseExerciseSnapshot(snapshot, await loadCourseCorpusManifest());
+      }
       const workspace = await initializeExerciseSolveWorkspace({
         templarHome: this.config.templarHome,
         runId,
         snapshot,
+        ...(course ? { workflowId: "course_security_evaluation" as const } : {}),
       });
       return {
-        workflow: exerciseSolveWorkflow(workspace),
-        requirePinnedAuditors: false,
+        workflow: course
+          ? courseSecurityEvaluationWorkflow(
+              workspace,
+              this.#courseModel === undefined ? {} : { model: this.#courseModel },
+            )
+          : exerciseSolveWorkflow(workspace),
+        requirePinnedAuditors: course,
       };
     });
   }

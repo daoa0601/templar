@@ -147,12 +147,14 @@ export class SecurityTeamRuntime implements AgentRuntime {
   readonly #delegate: AgentRuntime;
   readonly #plan: SecurityTeamPlan;
   readonly #phases: ReadonlyArray<SecurityTeamPhase>;
+  readonly metadata?: NonNullable<AgentRuntime["metadata"]>;
   #nextPhaseIndex = 0;
 
   constructor(delegate: AgentRuntime, plan: SecurityTeamPlan) {
     this.#delegate = delegate;
     this.#plan = plan;
     this.#phases = securityTeamPhases(plan);
+    if (delegate.metadata !== undefined) this.metadata = delegate.metadata;
   }
 
   readonly runTurn = (input: RuntimeTurnInput) =>
