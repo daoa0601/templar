@@ -144,6 +144,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: templar/pnpm-lock.yaml
           node-version: 24.15.0
+      - name: Build the sibling Node Guardrails module
+        working-directory: node-guardrails
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
       - name: Build the sibling Agent Blocks module
         working-directory: agent-blocks
         run: |
