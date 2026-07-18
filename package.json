@@ -1,6 +1,6 @@
 {
   "name": "templar",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Policy-gated network and security analysis built on Agent Blocks",

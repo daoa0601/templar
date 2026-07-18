@@ -61,13 +61,11 @@ The manifest contains `workspace:*` dependencies and the current lock resolves f
 | `@agentic-orch/node-guardrails` | Neutral bounded HTTP and verified content-addressed byte storage. |
 | `@agentic-orch/ts-quality`      | Development-only repository checks and shared configuration.      |
 
-Every `pnpm install --frozen-lockfile` therefore requires all four checkouts at the relative
-paths in `pnpm-workspace.yaml`. The checked-in workflow checks out Templar and a pinned Agent Blocks commit
-only; it does not check out Drone client, node-guardrails, or ts-quality (and Agent Blocks's own sibling links
-also need their packages). The current workflow and lock are consequently non-standalone and cannot
-serve as coordinated evidence. Local validation must recreate all four sibling paths, build Agent
-Blocks, and then run Templar's frozen install and gates. This is the intended informal-project
-topology; npm publication is not part of the plan.
+Every `pnpm install --frozen-lockfile` therefore requires all four checkouts at the relative paths
+in `pnpm-workspace.yaml`. The checked-in workflow recreates that layout at audited full commit SHAs,
+builds Node Guardrails before Agent Blocks, builds the remaining runtime modules, and then runs
+Templar's frozen install and gates. Local validation uses the same sibling layout. Source repository
+visibility does not imply npm publication.
 
 ## Dependency and supply-chain policy
 
