@@ -3,7 +3,7 @@ import type {
   RuntimeTurnInput,
   RuntimeTurnResult,
   SupervisorDecision,
-} from "aiur-orchestrator";
+} from "@agentic-orch/agent-blocks/templates/scoped-worktree";
 import { Effect } from "effect";
 
 interface EvaluationOutput {

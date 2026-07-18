@@ -79,6 +79,22 @@ const EXERCISE_SOLVE_BUDGET: WorkflowBudgets = {
   maxTokens: 300_000,
 };
 
+const SOURCE_SECURITY_AUDIT_BUDGET: WorkflowBudgets = {
+  wallClockSeconds: 1_200,
+  maxTurns: 8,
+  maxTokens: 800_000,
+  maxConcurrency: 3,
+  maxOutputBytes: 8 * 1024 * 1024,
+};
+
+const SOURCE_SECURITY_FIX_BUDGET: WorkflowBudgets = {
+  wallClockSeconds: 900,
+  maxTurns: 5,
+  maxTokens: 600_000,
+  maxConcurrency: 2,
+  maxOutputBytes: 8 * 1024 * 1024,
+};
+
 const STATIC_BUDGET: WorkflowBudgets = {
   wallClockSeconds: 600,
   maxTurns: 4,
@@ -182,6 +198,46 @@ export const WORKFLOW_CATALOG: ReadonlyArray<WorkflowCatalogEntry> = [
     traceAuditorRequired: false,
     persistencePolicy: "bounded_case_record",
     dataSensitivityPolicy: "operational",
+    releaseState: "enabled",
+  }),
+  entry({
+    id: "source_security_audit",
+    version: "1.0.0",
+    family: "blue_team",
+    description:
+      "Attacker-oriented static source audit with scoped hunt tracks and independent falsification.",
+    inputSchemaId: "templar://source_security_audit/SourceSecurityAuditInput/v1",
+    outputSchemaId: "templar://source_security_audit/SourceSecurityAuditResult/v1",
+    requiredCapability: "RE_STATIC",
+    authorizationCheckpoint: "local_source_snapshot_scope",
+    networkMode: "denied",
+    filesystemMode: "isolated_candidate_worktree",
+    toolAllowlist: ["read_source_snapshot", "read_security_surface"],
+    budgets: SOURCE_SECURITY_AUDIT_BUDGET,
+    evaluatorRequired: true,
+    traceAuditorRequired: true,
+    persistencePolicy: "bounded_case_record",
+    dataSensitivityPolicy: "sensitive_quarantine",
+    releaseState: "enabled",
+  }),
+  entry({
+    id: "source_security_fix",
+    version: "1.0.0",
+    family: "blue_team",
+    description:
+      "Create isolated source patches and regression tests for every accepted static-audit finding.",
+    inputSchemaId: "templar://source_security_fix/SourceSecurityFixInput/v1",
+    outputSchemaId: "templar://source_security_fix/SourceSecurityFixResult/v1",
+    requiredCapability: "RE_STATIC",
+    authorizationCheckpoint: "accepted_source_audit_scope",
+    networkMode: "denied",
+    filesystemMode: "isolated_candidate_worktree",
+    toolAllowlist: ["edit_source_snapshot", "write_regression_tests"],
+    budgets: SOURCE_SECURITY_FIX_BUDGET,
+    evaluatorRequired: true,
+    traceAuditorRequired: true,
+    persistencePolicy: "bounded_case_record",
+    dataSensitivityPolicy: "sensitive_quarantine",
     releaseState: "enabled",
   }),
   plannedPassive(

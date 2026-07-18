@@ -7,13 +7,22 @@ settings:
 importers:
   .:
     dependencies:
-      aiur-orchestrator:
-        specifier: file:../aiur-orchestrator
-        version: file:../aiur-orchestrator
+      "@agentic-orch/agent-blocks":
+        specifier: workspace:*
+        version: link:../agent-blocks
+      "@agentic-orch/drone-client":
+        specifier: workspace:*
+        version: link:../drone-client
+      "@agentic-orch/node-guardrails":
+        specifier: workspace:*
+        version: link:../node-guardrails
       effect:
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98
     devDependencies:
+      "@agentic-orch/ts-quality":
+        specifier: workspace:*
+        version: link:../ts-quality
       "@types/node":
         specifier: 22.20.1
         version: 22.20.1
@@ -826,11 +835,6 @@ packages:
       {
         integrity: sha512-fy9am/HWxbaGt/Sawrp90vt6Y6jQwf1RX77cz3uwoJwJVMli/e1IEwRPnMNJ7vKfPTwo0diXifkpPvwH9v7nGA==,
       }
-
-  aiur-orchestrator@file:../aiur-orchestrator:
-    resolution: { directory: ../aiur-orchestrator, type: directory }
-    engines: { node: ^22.22.2 || ^24.15.0 || >=26.0.0, pnpm: 11.13.1 }
-    hasBin: true
 
   assertion-error@2.0.1:
     resolution:
@@ -1761,11 +1765,6 @@ snapshots:
       "@vitest/pretty-format": 4.1.10
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
-
-  aiur-orchestrator@file:../aiur-orchestrator:
-    dependencies:
-      effect: 4.0.0-beta.98
-      yaml: 2.9.0
 
   assertion-error@2.0.1: {}
 

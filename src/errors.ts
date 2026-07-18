@@ -10,6 +10,8 @@ export type TemplarErrorCode =
   | "PCAP_LIMIT_EXCEEDED"
   | "RUN_NOT_ACTIVE"
   | "SERVICE_UNAVAILABLE"
+  | "SOURCE_INVALID"
+  | "SOURCE_LIMIT_EXCEEDED"
   | "INTERNAL_ERROR";
 
 export class TemplarError extends Error {

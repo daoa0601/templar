@@ -1,10 +1,14 @@
 import { execFile } from "node:child_process";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import type { AgentRuntime, RuntimeTurnInput, RuntimeTurnResult } from "aiur-orchestrator";
-import { RuntimeError } from "aiur-orchestrator";
+import { RuntimeError } from "@agentic-orch/agent-blocks/templates/scoped-worktree";
+import type {
+  AgentRuntime,
+  RuntimeTurnInput,
+  RuntimeTurnResult,
+} from "@agentic-orch/agent-blocks/templates/scoped-worktree";
 import { Effect } from "effect";
 
 const execFileAsync = promisify(execFile);
@@ -49,6 +53,35 @@ interface FakeExerciseContext {
   readonly required_observation_ids: ReadonlyArray<string>;
   readonly known_observation_ids: ReadonlyArray<string>;
   readonly available_checks: ReadonlyArray<string>;
+}
+
+interface FakeSourceSurface {
+  readonly files: ReadonlyArray<{ readonly path: string; readonly in_scope: boolean }>;
+  readonly entry_points: ReadonlyArray<{
+    readonly hint_id: string;
+    readonly path: string;
+    readonly line: number;
+  }>;
+  readonly input_hints: ReadonlyArray<{
+    readonly hint_id: string;
+    readonly path: string;
+    readonly line: number;
+  }>;
+  readonly sink_hints: ReadonlyArray<{
+    readonly hint_id: string;
+    readonly path: string;
+    readonly line: number;
+  }>;
+  readonly available_checks: ReadonlyArray<string>;
+}
+
+interface FakeSourceFixContext {
+  readonly findings: ReadonlyArray<{
+    readonly finding_id: string;
+    readonly primary_location: { readonly path: string; readonly line: number };
+    readonly data_flow: ReadonlyArray<{ readonly path: string; readonly line: number }>;
+  }>;
+  readonly required_promotion_impact: "high" | "routine";
 }
 
 const agentReport = JSON.stringify({
@@ -255,6 +288,238 @@ async function writeExerciseCandidate(
   );
 }
 
+async function writeSourceCandidate(
+  input: RuntimeTurnInput,
+  completeCoverage: boolean,
+): Promise<void> {
+  const surface = JSON.parse(
+    await readFile(path.join(input.cwd, "source-surface.json"), "utf8"),
+  ) as FakeSourceSurface;
+  const maybeLimited = <Value>(values: ReadonlyArray<Value>): ReadonlyArray<Value> =>
+    completeCoverage ? values : values.slice(0, Math.max(0, values.length - 1));
+  const entry = surface.entry_points[0];
+  const sourceInput = surface.input_hints.find((hint) => hint.path === entry?.path);
+  const sink = surface.sink_hints.find((hint) => hint.path === entry?.path);
+  const confirmedFinding =
+    completeCoverage && entry !== undefined && sourceInput !== undefined && sink !== undefined
+      ? [
+          {
+            finding_id: "FINDING-001",
+            title: "Attacker-controlled input reaches a sensitive source boundary",
+            cwe: "CWE-22",
+            severity: "high",
+            confidence: "medium",
+            primary_location: { path: sink.path, line: sink.line },
+            entry_point_hint_ids: [entry.hint_id],
+            input_hint_ids: [sourceInput.hint_id],
+            sink_hint_ids: [sink.hint_id],
+            data_flow: [
+              {
+                path: sourceInput.path,
+                line: sourceInput.line,
+                description: "The production entry reads attacker-controlled request data.",
+              },
+              {
+                path: sink.path,
+                line: sink.line,
+                description:
+                  "The value reaches the indexed sensitive operation without a visible boundary check.",
+              },
+            ],
+            gates: Object.fromEntries(
+              [
+                "unintended_behavior",
+                "production_reachability",
+                "attacker_control",
+                "defense_failure",
+                "new_capability",
+              ].map((name) => [
+                name,
+                {
+                  passed: true,
+                  evidence: `The bounded scripted fixture supplies evidence for ${name}.`,
+                },
+              ]),
+            ),
+            attack: "Supply boundary-breaking input through the indexed production entry point.",
+            impact: "The sensitive operation may expose data outside its intended boundary.",
+            fix_strategy:
+              "Canonicalize against a fixed root, reject boundary escapes, and add a regression test.",
+          },
+        ]
+      : [];
+  const output = {
+    schema_version: "1",
+    status: "completed",
+    summary: completeCoverage
+      ? "The scripted audit completed the static production surface inventory and retained one bounded fixture finding."
+      : "The scripted audit intentionally left surface coverage incomplete.",
+    coverage: {
+      scanned_file_paths: maybeLimited(
+        surface.files.filter((file) => file.in_scope).map((file) => file.path),
+      ),
+      entry_point_dispositions: maybeLimited(surface.entry_points).map((hint) => ({
+        hint_id: hint.hint_id,
+        disposition: "analyzed",
+        rationale: "The scripted runtime recorded this lexical lead for orchestration coverage.",
+      })),
+      input_dispositions: maybeLimited(surface.input_hints).map((hint) => ({
+        hint_id: hint.hint_id,
+        disposition:
+          confirmedFinding.length > 0 && hint.hint_id === sourceInput?.hint_id
+            ? "attacker_controlled"
+            : "not_attacker_controlled",
+        rationale:
+          confirmedFinding.length > 0 && hint.hint_id === sourceInput?.hint_id
+            ? "The bounded fixture explicitly reads this value from the request."
+            : "The scripted runtime makes no semantic attacker-control claim for this lead.",
+      })),
+      sink_dispositions: maybeLimited(surface.sink_hints).map((hint) => ({
+        hint_id: hint.hint_id,
+        disposition:
+          confirmedFinding.length > 0 && hint.hint_id === sink?.hint_id
+            ? "reachable"
+            : "not_security_relevant",
+        rationale:
+          confirmedFinding.length > 0 && hint.hint_id === sink?.hint_id
+            ? "The bounded fixture places this operation in the indexed route."
+            : "The scripted runtime makes no semantic reachability claim for this lead.",
+      })),
+    },
+    findings: confirmedFinding,
+    eliminated_candidates: [],
+    checks_performed: surface.available_checks,
+    promotion: {
+      impact: confirmedFinding.length === 0 ? "routine" : "high",
+      security_outcome: true,
+      headline_result: false,
+    },
+    external_mutations: [],
+  };
+  await writeFile(
+    path.join(input.cwd, "result.json"),
+    `${JSON.stringify(output, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(input.cwd, "report.md"),
+    `# Scope\n\nBounded production source snapshot.\n\n# Attack surface\n\nThe lexical inventory is dispositioned in result.json.\n\n# Confirmed findings\n\n${confirmedFinding.length === 0 ? "No complete finding is asserted." : "One bounded fixture finding is recorded in result.json."}\n\n# Eliminated candidates\n\nNone were generated by the scripted runtime.\n\n# Limitations\n\nThis runtime validates orchestration and deterministic contracts, not general source semantics.\n`,
+    "utf8",
+  );
+}
+
+async function writeSourceFixCandidate(
+  input: RuntimeTurnInput,
+  completeCoverage: boolean,
+): Promise<void> {
+  const context = JSON.parse(
+    await readFile(path.join(input.cwd, "source-fix-context.json"), "utf8"),
+  ) as FakeSourceFixContext;
+  const findings = completeCoverage ? context.findings : context.findings.slice(0, -1);
+  const findingsByPath = new Map<string, Array<string>>();
+  for (const finding of context.findings) {
+    const current = findingsByPath.get(finding.primary_location.path) ?? [];
+    current.push(finding.finding_id);
+    findingsByPath.set(finding.primary_location.path, current);
+  }
+  const changes: Array<Record<string, unknown>> = [];
+  for (const [sourcePath, findingIds] of findingsByPath) {
+    const destination = path.join(input.cwd, "target", ...sourcePath.split("/"));
+    const original = await readFile(destination, "utf8");
+    await writeFile(
+      destination,
+      `${original.replace(/\s*$/u, "")}\n\n// Security boundary hardened for ${findingIds.join(", ")}.\n`,
+      "utf8",
+    );
+    changes.push({
+      path: sourcePath,
+      status: "modified",
+      finding_ids: findingIds,
+      rationale: "Harden the shared sensitive boundary identified by the accepted audit.",
+    });
+  }
+
+  const testPath = "tests/templar-source-security-fix.test.ts";
+  if (completeCoverage) {
+    const destination = path.join(input.cwd, "target", ...testPath.split("/"));
+    await mkdir(path.dirname(destination), { recursive: true });
+    const alreadyExists = await access(destination).then(
+      () => true,
+      () => false,
+    );
+    const previous = alreadyExists ? await readFile(destination, "utf8") : "";
+    await writeFile(
+      destination,
+      `${previous}${previous.length === 0 ? "" : "\n"}test("rejects boundary-breaking security input", () => {\n  // The real candidate supplies a project-specific regression at this boundary.\n});\n`,
+      "utf8",
+    );
+    changes.push({
+      path: testPath,
+      status: alreadyExists ? "modified" : "added",
+      finding_ids: context.findings.map((finding) => finding.finding_id),
+      rationale: "Cover every accepted finding with a focused boundary regression.",
+    });
+  }
+
+  const output = {
+    schema_version: "1",
+    status: "completed",
+    summary: completeCoverage
+      ? "Every accepted fixture finding has a scoped source change and regression test."
+      : "This candidate intentionally leaves accepted findings unresolved.",
+    finding_resolutions: findings.map((finding) => ({
+      finding_id: finding.finding_id,
+      root_cause:
+        "Attacker-controlled data reached a sensitive boundary without a fixed-root check.",
+      changed_paths: [finding.primary_location.path],
+      regression_test_paths: completeCoverage ? [testPath] : [],
+      variant_locations: [
+        finding.primary_location,
+        ...finding.data_flow
+          .filter(
+            (location, index, all) =>
+              all.findIndex(
+                (candidate) => candidate.path === location.path && candidate.line === location.line,
+              ) === index &&
+              (location.path !== finding.primary_location.path ||
+                location.line !== finding.primary_location.line),
+          )
+          .map((location) => ({ path: location.path, line: location.line })),
+      ],
+      residual_risk:
+        "Project-specific dynamic behavior remains untested until an approved Drone replay.",
+    })),
+    changes,
+    tests: completeCoverage
+      ? [
+          {
+            path: testPath,
+            finding_ids: context.findings.map((finding) => finding.finding_id),
+            expected_behavior:
+              "Boundary-breaking input is rejected before the sensitive operation.",
+          },
+        ]
+      : [],
+    dynamic_validation: { status: "not_run", job_id: null },
+    promotion: {
+      impact: context.required_promotion_impact,
+      security_outcome: true,
+      headline_result: false,
+    },
+    external_mutations: [],
+  };
+  await writeFile(
+    path.join(input.cwd, "result.json"),
+    `${JSON.stringify(output, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(input.cwd, "report.md"),
+    `# Fix summary\n\nScoped source boundary changes are listed in result.json.\n\n# Finding coverage\n\n${completeCoverage ? "Every accepted finding has an implementation change." : "This candidate is intentionally incomplete."}\n\n# Tests\n\n${completeCoverage ? "Focused regression tests were added but not executed." : "No complete regression coverage was supplied."}\n\n# Residual risk\n\nDynamic validation was not run; any replay requires a separately approved Drone operation.\n`,
+    "utf8",
+  );
+}
+
 async function workflowId(cwd: string): Promise<string> {
   const parsed = JSON.parse(await readFile(path.join(cwd, "workflow.json"), "utf8")) as unknown;
   if (
@@ -336,7 +601,7 @@ async function auditCandidate(input: RuntimeTurnInput): Promise<string> {
       ? "Reran the deterministic evaluator; trace or evaluator coverage requires manual review."
       : "Reran the deterministic evaluator and inspected the complete scoped trace; no gaming indicators were observed.",
     evidence: [
-      "audit.checks_rerun=deterministic_evaluator,git_diff,evaluator_contract",
+      "audit.checks_rerun=deterministic_evaluator,evaluator_contract,git_diff",
       "audit.suspicious_behavior=none",
       `audit.finding=${traceFinding}`,
       `audit.disposition=${manualReview ? "manual_review" : "pass"}`,
@@ -361,11 +626,16 @@ export class ScriptedTemplarRuntime implements AgentRuntime {
           if (input.agentId === "candidate_a") {
             if (workflow === "pcap_security_triage") await writeSecurityCandidate(input, true);
             else if (workflow === "exercise_solve") await writeExerciseCandidate(input, true);
+            else if (workflow === "source_security_audit") await writeSourceCandidate(input, true);
+            else if (workflow === "source_security_fix") await writeSourceFixCandidate(input, true);
             else await writeCandidate(input, true);
           }
           if (input.agentId === "candidate_b") {
             if (workflow === "pcap_security_triage") await writeSecurityCandidate(input, false);
             else if (workflow === "exercise_solve") await writeExerciseCandidate(input, false);
+            else if (workflow === "source_security_audit") await writeSourceCandidate(input, false);
+            else if (workflow === "source_security_fix")
+              await writeSourceFixCandidate(input, false);
             else await writeCandidate(input, false);
           }
           const finalText = input.agentId.startsWith("audit_")
@@ -375,6 +645,191 @@ export class ScriptedTemplarRuntime implements AgentRuntime {
         }
 
         this.#supervisorTurns += 1;
+        if (workflow === "source_security_fix") {
+          if (this.#supervisorTurns === 1) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary:
+                  "Plan root-cause fixes and regression coverage for every accepted finding.",
+                assignments: [
+                  {
+                    agentId: "plan_once",
+                    roleId: "fix_planner",
+                    task: "Map every accepted finding to its root cause, variants, patch, and regression test.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 2) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Create two independent isolated source-fix candidates.",
+                assignments: [
+                  {
+                    agentId: "candidate_a",
+                    roleId: "fix_candidate",
+                    task: "Implement every accepted fix and add focused unexecuted regressions.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "candidate_b",
+                    roleId: "fix_candidate",
+                    task: "Independently implement the accepted fixes and regression coverage.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 3) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Audit both pinned source-fix candidates.",
+                assignments: [
+                  {
+                    agentId: "audit_a",
+                    roleId: "evaluation_auditor",
+                    task: "Audit candidate_a patch, finding coverage, tests, evaluator, and trace.",
+                    targetCandidateId: "candidate_a",
+                  },
+                  {
+                    agentId: "audit_b",
+                    roleId: "evaluation_auditor",
+                    task: "Audit candidate_b patch, finding coverage, tests, evaluator, and trace.",
+                    targetCandidateId: "candidate_b",
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          return result(
+            "supervisor-thread",
+            JSON.stringify({
+              status: "accept",
+              summary: "Accept the highest-scoring evaluator-passing, audit-cleared patch.",
+              assignments: [],
+              selectedCandidateId: "candidate_b",
+            }),
+          );
+        }
+        if (workflow === "source_security_audit") {
+          if (this.#supervisorTurns === 1) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Inventory the complete production source attack surface.",
+                assignments: [
+                  {
+                    agentId: "recon_once",
+                    roleId: "source_recon",
+                    task: "Map production entry points, inputs, shared controls, and call relationships.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 2) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Run three independently scoped source hunts.",
+                assignments: [
+                  {
+                    agentId: "injection_once",
+                    roleId: "injection_hunter",
+                    task: "Trace attacker inputs into interpreter and injection boundaries.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "boundary_once",
+                    roleId: "boundary_hunter",
+                    task: "Trace file, URL, navigation, request, and deserialization boundaries.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "authorization_once",
+                    roleId: "authorization_hunter",
+                    task: "Inspect authorization, state, race, secret, and resource-abuse paths.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 3) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Independently falsify all source-audit leads.",
+                assignments: [
+                  {
+                    agentId: "candidate_a",
+                    roleId: "source_falsifier",
+                    task: "Disprove hunt leads, complete the inventory, and write the audit result.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "candidate_b",
+                    roleId: "source_falsifier",
+                    task: "Independently re-read source, falsify leads, and write the audit result.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 4) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Audit both pinned source-audit candidates.",
+                assignments: [
+                  {
+                    agentId: "audit_a",
+                    roleId: "evaluation_auditor",
+                    task: "Audit candidate_a, its source claims, evaluator output, diff, and trace.",
+                    targetCandidateId: "candidate_a",
+                  },
+                  {
+                    agentId: "audit_b",
+                    roleId: "evaluation_auditor",
+                    task: "Audit candidate_b, its source claims, evaluator output, diff, and trace.",
+                    targetCandidateId: "candidate_b",
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          return result(
+            "supervisor-thread",
+            JSON.stringify({
+              status: "accept",
+              summary: "Accept the highest-scoring evaluator-passing, audit-cleared result.",
+              assignments: [],
+              selectedCandidateId: "candidate_b",
+            }),
+          );
+        }
         if (workflow === "exercise_solve") {
           if (this.#supervisorTurns === 1) {
             return result(

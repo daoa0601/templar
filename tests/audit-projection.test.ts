@@ -1,4 +1,4 @@
-import type { RunEventRecord } from "aiur-orchestrator";
+import type { RunEventRecord } from "@agentic-orch/agent-blocks/persistence";
 import { describe, expect, it } from "vitest";
 
 import { projectEvaluationAudit } from "../src/service.js";

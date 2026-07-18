@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Policy-gated network and security analysis powered by Aiur",
+  "description": "Policy-gated network and security analysis built on Agent Blocks",
   "packageManager": "pnpm@11.13.1",
+  "prettier": "@agentic-orch/ts-quality/prettier",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/daoa0601/templar.git"
@@ -36,16 +37,16 @@
     "dev": "pnpm build && node --enable-source-maps dist/cli.js serve",
     "format": "prettier --write . --ignore-unknown",
     "format:check": "prettier --check . --ignore-unknown",
-    "hooks:install": "node scripts/quality/install-hooks.mjs",
+    "hooks:install": "ts-quality hooks",
     "lint": "oxlint src tests scripts vitest.config.ts --deny-warnings",
-    "pack:check": "node scripts/quality/check-pack.mjs",
+    "pack:check": "ts-quality pack",
     "preflight": "pnpm quality",
     "preinstall": "node scripts/quality/require-pnpm.mjs",
     "quality": "pnpm quality:offline && pnpm deps:check",
     "quality:offline": "pnpm quality:quick && pnpm test:coverage && pnpm build && pnpm pack:check",
     "quality:quick": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm secrets:scan",
     "sample": "pnpm build && node --enable-source-maps dist/cli.js sample",
-    "secrets:scan": "node scripts/quality/scan-secrets.mjs",
+    "secrets:scan": "ts-quality secrets",
     "smoke:ctu13": "pnpm build && node --enable-source-maps scripts/smoke/ctu13.mjs",
     "smoke:ctu13:harness": "pnpm build && node --enable-source-maps scripts/smoke/ctu13.mjs --harness",
     "smoke:course-static": "pnpm build && node --enable-source-maps scripts/smoke/course-static.mjs",
@@ -56,10 +57,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "aiur-orchestrator": "file:../aiur-orchestrator",
+    "@agentic-orch/agent-blocks": "workspace:*",
+    "@agentic-orch/drone-client": "workspace:*",
+    "@agentic-orch/node-guardrails": "workspace:*",
     "effect": "4.0.0-beta.98"
   },
   "devDependencies": {
+    "@agentic-orch/ts-quality": "workspace:*",
     "@types/node": "22.20.1",
     "@vitest/coverage-v8": "4.1.10",
     "oxlint": "1.74.0",

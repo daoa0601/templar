@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.templar/schemas/source-security-candidate-result.v1.json",
+  "title": "Source security audit candidate result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "summary",
+    "coverage",
+    "findings",
+    "eliminated_candidates",
+    "checks_performed",
+    "promotion",
+    "external_mutations"
+  ],
+  "properties": {
+    "schema_version": { "const": "1" },
+    "status": { "const": "completed" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scanned_file_paths",
+        "entry_point_dispositions",
+        "input_dispositions",
+        "sink_dispositions"
+      ],
+      "properties": {
+        "scanned_file_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 240 }
+        },
+        "entry_point_dispositions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/entryDisposition" }
+        },
+        "input_dispositions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/inputDisposition" }
+        },
+        "sink_dispositions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sinkDisposition" }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 512,
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "eliminated_candidates": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": { "$ref": "#/$defs/eliminatedCandidate" }
+    },
+    "checks_performed": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["impact", "security_outcome", "headline_result"],
+      "properties": {
+        "impact": { "enum": ["routine", "high"] },
+        "security_outcome": { "const": true },
+        "headline_result": { "const": false }
+      }
+    },
+    "external_mutations": { "type": "array", "maxItems": 0 }
+  },
+  "$defs": {
+    "entryDisposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hint_id", "disposition", "rationale"],
+      "properties": {
+        "hint_id": { "type": "string" },
+        "disposition": { "enum": ["analyzed", "not_applicable"] },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "inputDisposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hint_id", "disposition", "rationale"],
+      "properties": {
+        "hint_id": { "type": "string" },
+        "disposition": {
+          "enum": ["attacker_controlled", "not_attacker_controlled", "not_applicable"]
+        },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "sinkDisposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hint_id", "disposition", "rationale"],
+      "properties": {
+        "hint_id": { "type": "string" },
+        "disposition": {
+          "enum": ["reachable", "not_reachable", "not_security_relevant", "not_applicable"]
+        },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "line"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "line": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "flowStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "line", "description"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "line": { "type": "integer", "minimum": 1 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "evidence"],
+      "properties": {
+        "passed": { "const": true },
+        "evidence": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id",
+        "title",
+        "cwe",
+        "severity",
+        "confidence",
+        "primary_location",
+        "entry_point_hint_ids",
+        "input_hint_ids",
+        "sink_hint_ids",
+        "data_flow",
+        "gates",
+        "attack",
+        "impact",
+        "fix_strategy"
+      ],
+      "properties": {
+        "finding_id": { "type": "string", "pattern": "^FINDING-[0-9]{3,5}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "cwe": { "type": "string", "pattern": "^CWE-[1-9][0-9]{0,4}$" },
+        "severity": { "enum": ["critical", "high", "medium", "low"] },
+        "confidence": { "enum": ["high", "medium"] },
+        "primary_location": { "$ref": "#/$defs/location" },
+        "entry_point_hint_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "input_hint_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "sink_hint_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "data_flow": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/flowStep" }
+        },
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unintended_behavior",
+            "production_reachability",
+            "attacker_control",
+            "defense_failure",
+            "new_capability"
+          ],
+          "properties": {
+            "unintended_behavior": { "$ref": "#/$defs/gate" },
+            "production_reachability": { "$ref": "#/$defs/gate" },
+            "attacker_control": { "$ref": "#/$defs/gate" },
+            "defense_failure": { "$ref": "#/$defs/gate" },
+            "new_capability": { "$ref": "#/$defs/gate" }
+          }
+        },
+        "attack": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "impact": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "fix_strategy": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+    "eliminatedCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "title", "reason", "evidence_locations"],
+      "properties": {
+        "candidate_id": { "type": "string", "pattern": "^CANDIDATE-[0-9]{3,5}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "evidence_locations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/location" }
+        }
+      }
+    }
+  }
+}

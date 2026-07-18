@@ -4,6 +4,9 @@ import {
   decodeExerciseSolveInput,
   decodeIncidentInput,
   decodePcapSecurityTriageInput,
+  decodeSourceSecurityAuditInput,
+  decodeSourceSecurityFixInput,
+  decodeSourceFixValidationInput,
   MAX_INCIDENT_TEXT,
 } from "../src/contracts.js";
 
@@ -52,6 +55,62 @@ describe("IncidentInput v1", () => {
         schema_version: "1",
         request: "x",
         observations: [{ observation_id: "a", kind: "note", value: { command: "run" } }],
+      }),
+    ).toThrow();
+  });
+});
+
+describe("SourceSecurityAuditInput v1", () => {
+  const artifact = `source_sha256_${"c".repeat(64)}`;
+
+  it("accepts only one opaque source snapshot ID", () => {
+    expect(
+      decodeSourceSecurityAuditInput({ schema_version: "1", source_snapshot_id: artifact }),
+    ).toEqual({ schema_version: "1", source_snapshot_id: artifact });
+  });
+
+  it.each([
+    { schema_version: "1", source_snapshot_id: "https://example.test/repo.git" },
+    { schema_version: "1", source_snapshot_id: artifact, path: "/tmp/repo" },
+    { schema_version: "1", source_snapshot_id: artifact, prompt: "find vulnerabilities" },
+    { schema_version: "1", source_snapshot_id: artifact, workflow_id: "redteam.exercise" },
+  ])("rejects unsupported or excess input %#", (input) => {
+    expect(() => decodeSourceSecurityAuditInput(input)).toThrow();
+  });
+});
+
+describe("SourceSecurityFixInput v1", () => {
+  it("accepts only one accepted-audit run ID", () => {
+    expect(
+      decodeSourceSecurityFixInput({ schema_version: "1", audit_run_id: "run_accepted_01" }),
+    ).toEqual({ schema_version: "1", audit_run_id: "run_accepted_01" });
+  });
+
+  it.each([
+    { schema_version: "1", audit_run_id: "../audit" },
+    { schema_version: "1", audit_run_id: "run_accepted", source_snapshot_id: "source" },
+    { schema_version: "1", audit_run_id: "run_accepted", findings: [] },
+  ])("rejects unsupported or excess input %#", (input) => {
+    expect(() => decodeSourceSecurityFixInput(input)).toThrow();
+  });
+});
+
+describe("SourceFixValidationInput v1", () => {
+  it("keeps replay approval separate and strictly shaped", () => {
+    expect(
+      decodeSourceFixValidationInput({
+        schema_version: "1",
+        rationale: "Run the accepted regression in Drone.",
+      }),
+    ).toEqual({
+      schema_version: "1",
+      rationale: "Run the accepted regression in Drone.",
+    });
+    expect(() =>
+      decodeSourceFixValidationInput({
+        schema_version: "1",
+        rationale: "Run it.",
+        operation_id: "arbitrary.command",
       }),
     ).toThrow();
   });

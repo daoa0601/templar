@@ -1,4 +1,4 @@
-import type { AgentRuntime } from "aiur-orchestrator";
+import type { AgentRuntime } from "@agentic-orch/agent-blocks/templates/scoped-worktree";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -8,6 +8,7 @@ import type { TemplarHttpServer } from "../src/http.js";
 import { TemplarService } from "../src/service.js";
 import { exerciseSnapshot } from "./exercise-fixture.js";
 import { classicPcap, tcpPacket, testConfig } from "./helpers.js";
+import { sourceSnapshot } from "./source-fixture.js";
 
 const TOKEN = "local-test-token";
 const AUTH = { Authorization: `Bearer ${TOKEN}` };
@@ -39,11 +40,24 @@ describe("Templar HTTP and dashboard boundaries", () => {
     expect(await (await fetch(`${server.origin}/health/live`)).json()).toEqual({ status: "ok" });
     expect((await fetch(`${server.origin}/api/runs`)).status).toBe(401);
     expect((await fetch(`${server.origin}/api/runs`, { headers: AUTH })).status).toBe(200);
+    expect(
+      (
+        await fetch(`${server.origin}/api/runs`, {
+          headers: {
+            ...AUTH,
+            Origin: "https://attacker.example",
+            "Sec-Fetch-Site": "cross-site",
+          },
+        })
+      ).status,
+    ).toBe(200);
 
     const page = await (await fetch(`${server.origin}/`)).text();
     const script = await (await fetch(`${server.origin}/app.js`)).text();
     expect(page).toContain("<title>Templar</title>");
     expect(page).toContain("exercise_solve");
+    expect(page).toContain("source_security_audit");
+    expect(page).toContain("source_security_fix");
     expect(script).toContain('api("/api/runs")');
     expect(script).not.toMatch(/codex|openai|jira|dispatchAgent|selectCandidate/iu);
 
@@ -67,11 +81,86 @@ describe("Templar HTTP and dashboard boundaries", () => {
 
     expect(await (await fetch(`${server.origin}/api/labs`, { headers: AUTH })).json()).toEqual([
       expect.objectContaining({
-        provider_id: "parallels_desktop",
+        provider_id: "drone",
         enabled: false,
         mutations_available: false,
+        reason: "disabled_by_configuration",
       }),
     ]);
+  });
+
+  it("protects tokenless loopback APIs while allowing local CLI and same-origin calls", async () => {
+    const config = await testConfig();
+    const service = new TemplarService(config, {
+      runtimeFactory: () => new ScriptedTemplarRuntime(),
+    });
+    await expect(startHttpServer(service, { port: 0, host: "0.0.0.0" })).rejects.toMatchObject({
+      code: "INVALID_INPUT",
+      status: 400,
+    });
+    const server = await startHttpServer(service, { port: 0 });
+    servers.push(server);
+
+    expect((await fetch(`${server.origin}/api/runs`)).status).toBe(200);
+    expect(
+      (
+        await fetch(`${server.origin}/api/runs`, {
+          headers: { Origin: server.origin, "Sec-Fetch-Site": "same-origin" },
+        })
+      ).status,
+    ).toBe(200);
+
+    const sameOriginCancellation = await fetch(`${server.origin}/api/runs/run_missing/cancel`, {
+      method: "POST",
+      headers: { Origin: server.origin, "Sec-Fetch-Site": "same-origin" },
+    });
+    expect(sameOriginCancellation.status).toBe(409);
+    expect(await sameOriginCancellation.json()).toMatchObject({
+      error: { code: "RUN_NOT_ACTIVE" },
+    });
+
+    const [crossOriginCancellation, crossSiteAcknowledgment, opaqueOriginAcknowledgment] =
+      await Promise.all([
+        fetch(`${server.origin}/api/runs/run_missing/cancel`, {
+          method: "POST",
+          headers: { Origin: "https://attacker.example" },
+        }),
+        fetch(`${server.origin}/api/runs/run_missing/acknowledge`, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain", "Sec-Fetch-Site": "cross-site" },
+          body: "{}",
+        }),
+        fetch(`${server.origin}/api/runs/run_missing/acknowledge`, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain", Origin: "null" },
+          body: "{}",
+        }),
+      ]);
+    expect([
+      crossOriginCancellation.status,
+      crossSiteAcknowledgment.status,
+      opaqueOriginAcknowledgment.status,
+    ]).toEqual([401, 401, 401]);
+
+    const rebound = await fetch(`${server.origin}/api/runs/run_missing/cancel`, {
+      method: "POST",
+      headers: {
+        Host: "attacker.example",
+        Origin: "http://attacker.example",
+        "Sec-Fetch-Site": "same-origin",
+      },
+    });
+    expect(rebound.status).toBe(401);
+
+    const nonJsonAcknowledgment = await fetch(`${server.origin}/api/runs/run_missing/acknowledge`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ rationale: "Reviewed the bounded promotion evidence." }),
+    });
+    expect(nonJsonAcknowledgment.status).toBe(415);
+    expect(await nonJsonAcknowledgment.json()).toMatchObject({
+      error: { code: "INVALID_INPUT", message: "Request body must be JSON." },
+    });
   });
 
   it("exposes durable run/event/result routes without leaking private agent reports", async () => {
@@ -234,6 +323,118 @@ describe("Templar HTTP and dashboard boundaries", () => {
       }),
     });
     expect(wrongShape.status).toBe(400);
+  }, 20_000);
+
+  it("stages a bounded source snapshot and routes the scoped static audit", async () => {
+    const config = await testConfig({ bearerToken: TOKEN });
+    const service = new TemplarService(config, {
+      runtimeFactory: () => new ScriptedTemplarRuntime(),
+    });
+    const server = await startHttpServer(service, { port: 0 });
+    servers.push(server);
+
+    const stagedResponse = await fetch(`${server.origin}/api/artifacts/source-snapshot`, {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify(sourceSnapshot()),
+    });
+    expect(stagedResponse.status).toBe(201);
+    const artifact = (await stagedResponse.json()) as { readonly artifact_id: string };
+    expect(artifact.artifact_id).toMatch(/^source_sha256_[a-f0-9]{64}$/u);
+
+    const submittedResponse = await fetch(
+      `${server.origin}/api/workflows/source_security_audit/runs`,
+      {
+        method: "POST",
+        headers: { ...AUTH, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schema_version: "1",
+          source_snapshot_id: artifact.artifact_id,
+        }),
+      },
+    );
+    expect(submittedResponse.status).toBe(202);
+    const submitted = (await submittedResponse.json()) as { readonly run_id: string };
+    expect(await terminal(server.origin, submitted.run_id)).toMatchObject({
+      workflow: "source_security_audit",
+      status: "accepted",
+      selectedCandidateId: "candidate_a",
+      applied: true,
+    });
+    expect(
+      await (
+        await fetch(`${server.origin}/api/runs/${submitted.run_id}/result`, { headers: AUTH })
+      ).json(),
+    ).toMatchObject({
+      result: {
+        status: "completed",
+        findings: [{ finding_id: "FINDING-001", severity: "high" }],
+      },
+      evaluation: {
+        strategy: "deterministic_evaluator_with_review",
+        passed: true,
+        review: { auditorCount: 1, traceComplete: true },
+      },
+      promotion: { reasons: ["high_impact_result", "security_result"], eligible: false },
+    });
+
+    const fixResponse = await fetch(`${server.origin}/api/workflows/source_security_fix/runs`, {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ schema_version: "1", audit_run_id: submitted.run_id }),
+    });
+    expect(fixResponse.status).toBe(202);
+    const fix = (await fixResponse.json()) as { readonly run_id: string };
+    expect(await terminal(server.origin, fix.run_id)).toMatchObject({
+      workflow: "source_security_fix",
+      status: "accepted",
+      selectedCandidateId: "candidate_a",
+      applied: true,
+    });
+    expect(
+      await (
+        await fetch(`${server.origin}/api/runs/${fix.run_id}/result`, { headers: AUTH })
+      ).json(),
+    ).toMatchObject({
+      result: {
+        finding_resolutions: [{ finding_id: "FINDING-001" }],
+        dynamic_validation: { status: "not_run", job_id: null },
+      },
+      evaluation: { passed: true },
+      promotion: { eligible: false },
+    });
+    const unconfiguredReplay = await fetch(`${server.origin}/api/runs/${fix.run_id}/verify`, {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schema_version: "1",
+        rationale: "Run the accepted fix in the configured Drone lab.",
+      }),
+    });
+    expect(unconfiguredReplay.status).toBe(409);
+    expect(await unconfiguredReplay.json()).toMatchObject({ error: { code: "CONFLICT" } });
+
+    const wrongShape = await fetch(`${server.origin}/api/workflows/source_security_audit/runs`, {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schema_version: "1",
+        source_snapshot_id: artifact.artifact_id,
+        repository_url: "https://example.test/repo.git",
+      }),
+    });
+    expect(wrongShape.status).toBe(400);
+
+    const wrongFixShape = await fetch(`${server.origin}/api/workflows/source_security_fix/runs`, {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schema_version: "1",
+        audit_run_id: submitted.run_id,
+        operation_id: "arbitrary.command",
+      }),
+    });
+    expect(wrongFixShape.status).toBe(400);
   }, 20_000);
 
   it("interrupts only a live process-owned fiber and exposes the durable terminal state", async () => {

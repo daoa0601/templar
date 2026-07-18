@@ -32,6 +32,21 @@ const ExerciseSolveInputSchema = Schema.Struct({
   exercise_snapshot_id: Schema.String,
 });
 
+const SourceSecurityAuditInputSchema = Schema.Struct({
+  schema_version: Schema.Literal("1"),
+  source_snapshot_id: Schema.String,
+});
+
+const SourceSecurityFixInputSchema = Schema.Struct({
+  schema_version: Schema.Literal("1"),
+  audit_run_id: Schema.String,
+});
+
+const SourceFixValidationInputSchema = Schema.Struct({
+  schema_version: Schema.Literal("1"),
+  rationale: Schema.String,
+});
+
 const decodeIncidentShape = SchemaParser.decodeUnknownSync(IncidentInputSchema, {
   errors: "all",
   onExcessProperty: "error",
@@ -49,6 +64,27 @@ const decodeExerciseSolveShape = SchemaParser.decodeUnknownSync(ExerciseSolveInp
   errors: "all",
   onExcessProperty: "error",
 });
+
+const decodeSourceSecurityAuditShape = SchemaParser.decodeUnknownSync(
+  SourceSecurityAuditInputSchema,
+  {
+    errors: "all",
+    onExcessProperty: "error",
+  },
+);
+
+const decodeSourceSecurityFixShape = SchemaParser.decodeUnknownSync(SourceSecurityFixInputSchema, {
+  errors: "all",
+  onExcessProperty: "error",
+});
+
+const decodeSourceFixValidationShape = SchemaParser.decodeUnknownSync(
+  SourceFixValidationInputSchema,
+  {
+    errors: "all",
+    onExcessProperty: "error",
+  },
+);
 
 export interface StructuredObservation {
   readonly observation_id: string;
@@ -76,11 +112,27 @@ export interface ExerciseSolveInput {
   readonly exercise_snapshot_id: string;
 }
 
+export interface SourceSecurityAuditInput {
+  readonly schema_version: "1";
+  readonly source_snapshot_id: string;
+}
+
+export interface SourceSecurityFixInput {
+  readonly schema_version: "1";
+  readonly audit_run_id: string;
+}
+
+export interface SourceFixValidationInput {
+  readonly schema_version: "1";
+  readonly rationale: string;
+}
+
 const SAFE_ID = /^[a-z][a-z0-9_.-]{0,63}$/u;
 const SAFE_KIND = /^[a-z][a-z0-9_.-]{0,63}$/u;
 const TICKET_REF = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,9}$/u;
 const ARTIFACT_ID = /^pcap_sha256_[a-f0-9]{64}$/u;
 const EXERCISE_SNAPSHOT_ID = /^exercise_sha256_[a-f0-9]{64}$/u;
+const SOURCE_SNAPSHOT_ID = /^source_sha256_[a-f0-9]{64}$/u;
 const PRIORITY = /^(?:lowest|low|medium|high|highest|p[1-5])$/iu;
 const URL = /\b(?:https?|file|ftp):\/\//iu;
 const WINDOWS_PATH = /(?:^|[\s("'=])[A-Za-z]:\\[^\s]+/u;
@@ -216,4 +268,42 @@ export function decodeExerciseSolveInput(value: unknown): ExerciseSolveInput {
     throw invalidInput("exercise_snapshot_id must be a content-addressed exercise snapshot ID.");
   }
   return input;
+}
+
+export function isSourceSnapshotId(value: string): boolean {
+  return SOURCE_SNAPSHOT_ID.test(value);
+}
+
+export function decodeSourceSecurityAuditInput(value: unknown): SourceSecurityAuditInput {
+  let input: typeof SourceSecurityAuditInputSchema.Type;
+  try {
+    input = decodeSourceSecurityAuditShape(value);
+  } catch (cause) {
+    throw invalidInput("SourceSecurityAuditInput v1 does not match the strict schema.", cause);
+  }
+  if (!SOURCE_SNAPSHOT_ID.test(input.source_snapshot_id)) {
+    throw invalidInput("source_snapshot_id must be a content-addressed source snapshot ID.");
+  }
+  return input;
+}
+
+export function decodeSourceSecurityFixInput(value: unknown): SourceSecurityFixInput {
+  let input: typeof SourceSecurityFixInputSchema.Type;
+  try {
+    input = decodeSourceSecurityFixShape(value);
+  } catch (cause) {
+    throw invalidInput("SourceSecurityFixInput v1 does not match the strict schema.", cause);
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(input.audit_run_id)) {
+    throw invalidInput("audit_run_id must be a valid Templar run ID.");
+  }
+  return input;
+}
+
+export function decodeSourceFixValidationInput(value: unknown): SourceFixValidationInput {
+  try {
+    return decodeSourceFixValidationShape(value);
+  } catch (cause) {
+    throw invalidInput("SourceFixValidationInput v1 does not match the strict schema.", cause);
+  }
 }

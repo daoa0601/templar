@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -71,6 +72,38 @@ describe("bounded exercise snapshots", () => {
     const staged = await store.stage(exerciseSnapshot());
     expect(staged.artifact_id).toMatch(/^exercise_sha256_[a-f0-9]{64}$/u);
     await expect(store.resolve(staged.artifact_id)).resolves.toEqual(exerciseSnapshot());
+  });
+
+  it("rejects symlinks, oversized custody files, and digest-valid invalid JSON", async () => {
+    const root = await temporaryDirectory("templar-exercise-custody-");
+    const store = new ExerciseSnapshotStore(root, 256 * 1024);
+    const staged = await store.stage(exerciseSnapshot());
+    const stagedPath = path.join(
+      root,
+      `${staged.artifact_id.slice("exercise_sha256_".length)}.json`,
+    );
+    await unlink(stagedPath);
+    await symlink("/dev/null", stagedPath);
+    await expect(store.resolve(staged.artifact_id)).rejects.toMatchObject({
+      code: "EXERCISE_INVALID",
+      status: 400,
+    });
+
+    const invalid = Buffer.from("not-json\n");
+    const invalidDigest = createHash("sha256").update(invalid).digest("hex");
+    await writeFile(path.join(root, `${invalidDigest}.json`), invalid, { mode: 0o600 });
+    await expect(store.resolve(`exercise_sha256_${invalidDigest}`)).rejects.toMatchObject({
+      code: "EXERCISE_INVALID",
+      status: 400,
+    });
+
+    const oversized = Buffer.alloc(256 * 1024 + 1, 0x20);
+    const oversizedDigest = createHash("sha256").update(oversized).digest("hex");
+    await writeFile(path.join(root, `${oversizedDigest}.json`), oversized, { mode: 0o600 });
+    await expect(store.resolve(`exercise_sha256_${oversizedDigest}`)).rejects.toMatchObject({
+      code: "EXERCISE_LIMIT_EXCEEDED",
+      status: 400,
+    });
   });
 
   it("creates a binary-free workspace and evaluates a fully grounded answer", async () => {

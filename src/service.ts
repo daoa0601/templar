@@ -4,42 +4,69 @@ import path from "node:path";
 import {
   assertRunId,
   createRunId,
+  readRunEventRecords,
+} from "@agentic-orch/agent-blocks/persistence";
+import type { RunEventRecord } from "@agentic-orch/agent-blocks/persistence";
+import {
   inspectRunState,
   listRuns,
-  makeCodexRuntime,
-  readRunEventRecords,
   readRunEvents,
-  runOrchestration,
-} from "aiur-orchestrator";
+} from "@agentic-orch/agent-blocks/templates/scoped-worktree/control-plane";
 import type {
-  AgentRuntime,
   PublicRunEvent,
   PublicRunView,
-  RunEventRecord,
+} from "@agentic-orch/agent-blocks/templates/scoped-worktree/control-plane";
+import {
+  makeCodexRuntime,
+  runOrchestration,
+} from "@agentic-orch/agent-blocks/templates/scoped-worktree";
+import type {
+  AgentRuntime,
   WorkflowDefinition,
-} from "aiur-orchestrator";
+} from "@agentic-orch/agent-blocks/templates/scoped-worktree";
 import { Effect, Fiber } from "effect";
 import type { Fiber as EffectFiber } from "effect/Fiber";
 
 import type { TemplarConfig } from "./config.js";
 import { requiresHumanAcknowledgment, workflowEntry } from "./catalog.js";
-import type { ExerciseSolveInput, IncidentInput, PcapSecurityTriageInput } from "./contracts.js";
+import type {
+  ExerciseSolveInput,
+  IncidentInput,
+  PcapSecurityTriageInput,
+  SourceSecurityAuditInput,
+  SourceSecurityFixInput,
+} from "./contracts.js";
+import { isSourceSnapshotId } from "./contracts.js";
+import { DroneClient, droneUnavailableStatus } from "./drone-client.js";
+import type { DroneJob, DroneProviderStatus } from "./drone-client.js";
 import { TemplarError } from "./errors.js";
 import { ExerciseSnapshotStore } from "./exercise-store.js";
 import type { StoredExerciseSnapshot } from "./exercise-store.js";
-import { analyzeClassicPcapFile } from "./pcap-analyzer.js";
+import { analyzeClassicPcapBytes } from "./pcap-analyzer.js";
 import { PcapArtifactStore } from "./pcap-store.js";
 import type { StoredPcapArtifact } from "./pcap-store.js";
-import { parallelsDesktopStatus } from "./lab-provider.js";
-import type { LabProviderStatus } from "./lab-provider.js";
+import { SourceSnapshotStore } from "./source-store.js";
+import type { StoredSourceSnapshot } from "./source-store.js";
+import { buildSourceFixContext, decodeSourceAuditReference } from "./source-fix.js";
+import {
+  assertSourceValidationOperation,
+  buildSourceValidationArtifact,
+  SOURCE_VALIDATION_INPUT_SLOT,
+  SOURCE_VALIDATION_MEDIA_TYPE,
+  validationRationale,
+} from "./source-validation.js";
 import {
   exerciseSolveWorkflow,
   pcapSecurityTriageWorkflow,
+  sourceSecurityAuditWorkflow,
+  sourceSecurityFixWorkflow,
   telecomIncidentWorkflow,
 } from "./workflow.js";
 import {
   initializeExerciseSolveWorkspace,
   initializePcapSecurityTriageWorkspace,
+  initializeSourceSecurityAuditWorkspace,
+  initializeSourceSecurityFixWorkspace,
   initializeTelecomIncidentWorkspace,
 } from "./workspace.js";
 import { DeterministicSelectionRuntime } from "./selection-guard.js";
@@ -98,19 +125,43 @@ export interface PromotionView {
   readonly eligible: boolean;
 }
 
+export interface SourceFixValidationRequestView {
+  readonly schema_version: "1";
+  readonly run_id: string;
+  readonly operation_id: string;
+  readonly source_artifact_id: string;
+  readonly job_id: string;
+  readonly requested_at: string;
+  readonly rationale: string;
+}
+
+export interface SourceFixValidationView {
+  readonly request: SourceFixValidationRequestView;
+  readonly job: DroneJob;
+}
+
+type TemplarDroneClient = Pick<
+  DroneClient,
+  "providers" | "operations" | "stageArtifact" | "submitJob" | "job"
+>;
+
 export class TemplarService {
   readonly config: TemplarConfig;
   readonly artifacts: PcapArtifactStore;
   readonly exercises: ExerciseSnapshotStore;
+  readonly sources: SourceSnapshotStore;
   readonly #runtimeFactory:
     ((runId: string, workflowId: string) => AgentRuntime | undefined) | undefined;
+  readonly #drone: TemplarDroneClient;
   readonly #active = new Map<string, RunFiber>();
+  readonly #validationSubmissions = new Map<string, Promise<SourceFixValidationView>>();
   #reservedSlots = 0;
 
   constructor(
     config: TemplarConfig,
     options: {
       readonly runtimeFactory?: (runId: string, workflowId: string) => AgentRuntime | undefined;
+      readonly droneClient?: TemplarDroneClient;
     } = {},
   ) {
     this.config = config;
@@ -119,7 +170,18 @@ export class TemplarService {
       config.exerciseArtifactRoot,
       config.maxExerciseSnapshotBytes,
     );
+    this.sources = new SourceSnapshotStore(
+      config.sourceArtifactRoot,
+      config.maxSourceSnapshotBytes,
+    );
     this.#runtimeFactory = options.runtimeFactory;
+    this.#drone =
+      options.droneClient ??
+      new DroneClient({
+        baseUrl: config.droneUrl,
+        ...(config.droneToken === undefined ? {} : { token: config.droneToken }),
+        timeoutMs: config.droneTimeoutMs,
+      });
   }
 
   get activeRunCount(): number {
@@ -131,6 +193,7 @@ export class TemplarService {
     await mkdir(this.config.harnessHome, { recursive: true, mode: 0o700 });
     await this.artifacts.initialize();
     await this.exercises.initialize();
+    await this.sources.initialize();
   }
 
   async stagePcap(bytes: Uint8Array): Promise<StoredPcapArtifact> {
@@ -141,14 +204,17 @@ export class TemplarService {
     return this.exercises.stage(value);
   }
 
-  async labProviders(): Promise<ReadonlyArray<LabProviderStatus>> {
-    return [
-      await parallelsDesktopStatus({
-        enabled: this.config.parallelsDesktopEnabled,
-        cliPath: this.config.parallelsCliPath,
-        quarantineRoot: this.config.parallelsQuarantineRoot,
-      }),
-    ];
+  async stageSourceSnapshot(value: unknown): Promise<StoredSourceSnapshot> {
+    return this.sources.stage(value);
+  }
+
+  async labProviders(): Promise<ReadonlyArray<DroneProviderStatus>> {
+    if (!this.config.droneEnabled) return [droneUnavailableStatus("disabled_by_configuration")];
+    try {
+      return await this.#drone.providers();
+    } catch {
+      return [droneUnavailableStatus("service_unavailable")];
+    }
   }
 
   async submitTelecomIncident(incident: IncidentInput): Promise<SubmitResult> {
@@ -156,8 +222,8 @@ export class TemplarService {
       const pcap =
         incident.pcap_artifact_id === undefined
           ? undefined
-          : await analyzeClassicPcapFile(
-              await this.artifacts.resolve(incident.pcap_artifact_id),
+          : analyzeClassicPcapBytes(
+              await this.artifacts.read(incident.pcap_artifact_id),
               incident.pcap_artifact_id,
               { maxBytes: this.config.maxPcapBytes, maxPackets: this.config.maxPcapPackets },
             );
@@ -173,8 +239,8 @@ export class TemplarService {
 
   async submitPcapSecurityTriage(input: PcapSecurityTriageInput): Promise<SubmitResult> {
     return this.#submit(async (runId) => {
-      const pcap = await analyzeClassicPcapFile(
-        await this.artifacts.resolve(input.pcap_artifact_id),
+      const pcap = analyzeClassicPcapBytes(
+        await this.artifacts.read(input.pcap_artifact_id),
         input.pcap_artifact_id,
         { maxBytes: this.config.maxPcapBytes, maxPackets: this.config.maxPcapPackets },
       );
@@ -203,6 +269,224 @@ export class TemplarService {
         requirePinnedAuditors: false,
       };
     });
+  }
+
+  async submitSourceSecurityAudit(input: SourceSecurityAuditInput): Promise<SubmitResult> {
+    return this.#submit(async (runId) => {
+      const snapshot = await this.sources.resolve(input.source_snapshot_id);
+      const workspace = await initializeSourceSecurityAuditWorkspace({
+        templarHome: this.config.templarHome,
+        runId,
+        sourceSnapshotId: input.source_snapshot_id,
+        snapshot,
+      });
+      return {
+        workflow: sourceSecurityAuditWorkflow(workspace),
+        requirePinnedAuditors: true,
+      };
+    });
+  }
+
+  async submitSourceSecurityFix(input: SourceSecurityFixInput): Promise<SubmitResult> {
+    const audit = await this.result(input.audit_run_id);
+    if (audit.run.workflow !== "source_security_audit" || !audit.evaluation.passed) {
+      throw new TemplarError({
+        code: "CONFLICT",
+        message: "A source fix requires an accepted, evaluation-passing source security audit.",
+        status: 409,
+      });
+    }
+    const reference = decodeSourceAuditReference(
+      JSON.parse(
+        await readFile(
+          path.join(this.incidentDirectory(input.audit_run_id), "source-metadata.json"),
+          "utf8",
+        ),
+      ) as unknown,
+    );
+    const snapshot = await this.sources.resolve(reference.source_snapshot_id);
+    if (JSON.stringify(snapshot.repository) !== JSON.stringify(reference.repository)) {
+      throw new TemplarError({
+        code: "CONFLICT",
+        message: "The accepted audit no longer matches its content-addressed source snapshot.",
+        status: 409,
+      });
+    }
+    const context = buildSourceFixContext({
+      sourceAuditRunId: input.audit_run_id,
+      sourceSnapshotId: reference.source_snapshot_id,
+      snapshot,
+      auditResult: audit.result,
+    });
+    return this.#submit(async (runId) => {
+      const workspace = await initializeSourceSecurityFixWorkspace({
+        templarHome: this.config.templarHome,
+        runId,
+        snapshot,
+        context,
+      });
+      return {
+        workflow: sourceSecurityFixWorkflow(workspace),
+        requirePinnedAuditors: true,
+      };
+    });
+  }
+
+  async submitSourceFixValidation(
+    runId: string,
+    rationale: string,
+  ): Promise<SourceFixValidationView> {
+    assertRunId(runId);
+    const inFlight = this.#validationSubmissions.get(runId);
+    if (inFlight !== undefined) return inFlight;
+    const submission = this.#submitSourceFixValidation(runId, rationale).finally(() => {
+      this.#validationSubmissions.delete(runId);
+    });
+    this.#validationSubmissions.set(runId, submission);
+    return submission;
+  }
+
+  async #submitSourceFixValidation(
+    runId: string,
+    rationale: string,
+  ): Promise<SourceFixValidationView> {
+    const operationId = this.config.droneSourceValidationOperationId;
+    if (!this.config.droneEnabled || operationId === undefined) {
+      throw new TemplarError({
+        code: "CONFLICT",
+        message: "Drone source validation is not explicitly configured.",
+        status: 409,
+      });
+    }
+    const normalizedRationale = validationRationale(rationale);
+    const current = await this.result(runId);
+    if (
+      current.run.workflow !== "source_security_fix" ||
+      !current.evaluation.passed ||
+      !current.promotion.acknowledged
+    ) {
+      throw new TemplarError({
+        code: "CONFLICT",
+        message:
+          "Drone replay requires an accepted source fix, a passing evaluation, and promotion acknowledgment.",
+        status: 409,
+      });
+    }
+    const existing = await this.#sourceValidationRequest(runId);
+    if (existing !== undefined) {
+      if (existing.rationale !== normalizedRationale) {
+        throw new TemplarError({
+          code: "CONFLICT",
+          message: "An immutable Drone validation request already exists for this source fix.",
+          status: 409,
+        });
+      }
+      return this.sourceFixValidation(runId);
+    }
+
+    const workflow = record(
+      JSON.parse(
+        await readFile(path.join(this.incidentDirectory(runId), "workflow.json"), "utf8"),
+      ) as unknown,
+    );
+    const sourceSnapshotId = workflow?.source_snapshot_id;
+    if (typeof sourceSnapshotId !== "string" || !isSourceSnapshotId(sourceSnapshotId)) {
+      throw new TemplarError({
+        code: "INTERNAL_ERROR",
+        message: "Accepted source-fix metadata is invalid.",
+        status: 500,
+        expose: false,
+      });
+    }
+    const snapshot = await this.sources.resolve(sourceSnapshotId);
+    const artifactBytes = await buildSourceValidationArtifact({
+      targetRoot: path.join(this.incidentDirectory(runId), "target"),
+      repository: snapshot.repository,
+      maximumBytes: this.config.maxSourceSnapshotBytes,
+    });
+    const operation = (await this.#drone.operations()).find(
+      (candidate) => candidate.operation_id === operationId,
+    );
+    if (operation === undefined) {
+      throw new TemplarError({
+        code: "CONFLICT",
+        message: "The configured Drone source-validation operation is unavailable.",
+        status: 409,
+      });
+    }
+    assertSourceValidationOperation(operation, artifactBytes.byteLength);
+    const artifact = await this.#drone.stageArtifact(artifactBytes, SOURCE_VALIDATION_MEDIA_TYPE);
+    const job = await this.#drone.submitJob({
+      schema_version: "1",
+      operation_id: operationId,
+      inputs: { [SOURCE_VALIDATION_INPUT_SLOT]: artifact.artifact_id },
+    });
+    const request: SourceFixValidationRequestView = {
+      schema_version: "1",
+      run_id: runId,
+      operation_id: operationId,
+      source_artifact_id: artifact.artifact_id,
+      job_id: job.job_id,
+      requested_at: job.submitted_at,
+      rationale: normalizedRationale,
+    };
+    try {
+      await writeFile(
+        path.join(this.incidentDirectory(runId), "source-validation-request.json"),
+        `${JSON.stringify(request, null, 2)}\n`,
+        { encoding: "utf8", mode: 0o600, flag: "wx" },
+      );
+    } catch (cause) {
+      if (
+        typeof cause === "object" &&
+        cause !== null &&
+        "code" in cause &&
+        cause.code === "EEXIST"
+      ) {
+        const raced = await this.#sourceValidationRequest(runId);
+        if (raced?.rationale === normalizedRationale) return this.sourceFixValidation(runId);
+        throw new TemplarError({
+          code: "CONFLICT",
+          message: "An immutable Drone validation request already exists for this source fix.",
+          status: 409,
+          cause,
+        });
+      }
+      throw cause;
+    }
+    return { request, job };
+  }
+
+  async sourceFixValidation(runId: string): Promise<SourceFixValidationView> {
+    assertRunId(runId);
+    if (!this.config.droneEnabled) {
+      throw new TemplarError({
+        code: "SERVICE_UNAVAILABLE",
+        message: "Drone is disabled.",
+        status: 503,
+      });
+    }
+    const request = await this.#sourceValidationRequest(runId);
+    if (request === undefined) {
+      throw new TemplarError({
+        code: "NOT_FOUND",
+        message: "No Drone validation request exists for this source fix.",
+        status: 404,
+      });
+    }
+    const job = await this.#drone.job(request.job_id);
+    if (
+      job.operation_id !== request.operation_id ||
+      job.inputs[SOURCE_VALIDATION_INPUT_SLOT] !== request.source_artifact_id
+    ) {
+      throw new TemplarError({
+        code: "SERVICE_UNAVAILABLE",
+        message: "Drone returned an unrelated validation job.",
+        status: 503,
+        expose: false,
+      });
+    }
+    return { request, job };
   }
 
   async #submit(
@@ -497,6 +781,65 @@ export class TemplarService {
       if (typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT")
         return undefined;
       throw cause;
+    }
+  }
+
+  async #sourceValidationRequest(
+    runId: string,
+  ): Promise<SourceFixValidationRequestView | undefined> {
+    try {
+      const parsed = record(
+        JSON.parse(
+          await readFile(
+            path.join(this.incidentDirectory(runId), "source-validation-request.json"),
+            "utf8",
+          ),
+        ) as unknown,
+      );
+      const keys = parsed === undefined ? [] : Object.keys(parsed).sort();
+      const expected = [
+        "job_id",
+        "operation_id",
+        "rationale",
+        "requested_at",
+        "run_id",
+        "schema_version",
+        "source_artifact_id",
+      ].sort();
+      if (
+        parsed?.schema_version !== "1" ||
+        parsed.run_id !== runId ||
+        JSON.stringify(keys) !== JSON.stringify(expected) ||
+        typeof parsed.operation_id !== "string" ||
+        !/^[a-z][a-z0-9_.-]{0,127}$/u.test(parsed.operation_id) ||
+        typeof parsed.source_artifact_id !== "string" ||
+        !/^sha256_[a-f0-9]{64}$/u.test(parsed.source_artifact_id) ||
+        typeof parsed.job_id !== "string" ||
+        !/^job_[a-f0-9]{32}$/u.test(parsed.job_id) ||
+        typeof parsed.requested_at !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(parsed.requested_at) ||
+        typeof parsed.rationale !== "string"
+      ) {
+        throw new Error("Stored source validation request is malformed.");
+      }
+      return parsed as unknown as SourceFixValidationRequestView;
+    } catch (cause) {
+      if (
+        typeof cause === "object" &&
+        cause !== null &&
+        "code" in cause &&
+        cause.code === "ENOENT"
+      ) {
+        return undefined;
+      }
+      if (cause instanceof TemplarError) throw cause;
+      throw new TemplarError({
+        code: "INTERNAL_ERROR",
+        message: "Stored source validation request is unavailable.",
+        status: 500,
+        expose: false,
+        cause,
+      });
     }
   }
 }
