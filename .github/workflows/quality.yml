@@ -38,7 +38,7 @@ jobs:
         with:
           path: agent-blocks
           persist-credentials: false
-          ref: 83325593b8df1062a5e2ceabb649f86d23a526f4
+          ref: e400cd0432b3c8a4c3b5f611e9a8e95a551d87d4
           repository: daoa0601/agent-blocks
       - name: Check out the sibling Drone Client dependency
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -110,7 +110,7 @@ jobs:
         with:
           path: agent-blocks
           persist-credentials: false
-          ref: 83325593b8df1062a5e2ceabb649f86d23a526f4
+          ref: e400cd0432b3c8a4c3b5f611e9a8e95a551d87d4
           repository: daoa0601/agent-blocks
       - name: Check out the sibling Drone Client dependency
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

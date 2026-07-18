@@ -38,6 +38,7 @@ describe("Templar workflow capability gates", () => {
       traceAuditorRequired: true,
     });
     expect(workflowEntry("pcap_security_triage")).toMatchObject({
+      agentOrganizationId: "pcap_security_triage",
       releaseState: "enabled",
       family: "blue_team",
       requiredCapability: "PASSIVE_READ",
@@ -53,6 +54,7 @@ describe("Templar workflow capability gates", () => {
       traceAuditorRequired: false,
     });
     expect(workflowEntry("source_security_audit")).toMatchObject({
+      agentOrganizationId: "source_security_audit",
       releaseState: "enabled",
       family: "blue_team",
       requiredCapability: "RE_STATIC",
@@ -60,6 +62,7 @@ describe("Templar workflow capability gates", () => {
       traceAuditorRequired: true,
     });
     expect(workflowEntry("source_security_fix")).toMatchObject({
+      agentOrganizationId: "source_security_fix",
       releaseState: "enabled",
       family: "blue_team",
       requiredCapability: "RE_STATIC",

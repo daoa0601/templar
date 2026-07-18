@@ -40,6 +40,15 @@ describe("Templar HTTP and dashboard boundaries", () => {
     expect(await (await fetch(`${server.origin}/health/live`)).json()).toEqual({ status: "ok" });
     expect((await fetch(`${server.origin}/api/runs`)).status).toBe(401);
     expect((await fetch(`${server.origin}/api/runs`, { headers: AUTH })).status).toBe(200);
+    const workflows = (await (
+      await fetch(`${server.origin}/api/workflows`, { headers: AUTH })
+    ).json()) as ReadonlyArray<Record<string, unknown>>;
+    expect(workflows).toContainEqual(
+      expect.objectContaining({
+        id: "source_security_audit",
+        agentOrganizationId: "source_security_audit",
+      }),
+    );
     expect(
       (
         await fetch(`${server.origin}/api/runs`, {

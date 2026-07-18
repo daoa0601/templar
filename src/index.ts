@@ -1,4 +1,6 @@
 export * from "./catalog.js";
+export * from "./security-teams.js";
+export * from "./security-team-guard.js";
 export * from "./config.js";
 export * from "./contracts.js";
 export * from "./evidence.js";
