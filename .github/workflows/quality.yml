@@ -13,10 +13,6 @@ concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Historical remote slug; rename the GitHub repository separately from this local extraction.
-  AGENT_BLOCKS_REPOSITORY: ${{ github.repository_owner }}/aiur-orchestrator
-
 jobs:
   offline:
     name: Offline gates (Node ${{ matrix.node-version }})
@@ -42,8 +38,29 @@ jobs:
         with:
           path: agent-blocks
           persist-credentials: false
-          ref: 855ee9ba2a9a1a34e74cdb36c5513d08468bc7af
-          repository: ${{ env.AGENT_BLOCKS_REPOSITORY }}
+          ref: 83325593b8df1062a5e2ceabb649f86d23a526f4
+          repository: daoa0601/agent-blocks
+      - name: Check out the sibling Drone Client dependency
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: drone-client
+          persist-credentials: false
+          ref: 6f7308cf367b2e1674ca53bfc8929efa91e0e961
+          repository: daoa0601/drone-client
+      - name: Check out the sibling Node Guardrails dependency
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: node-guardrails
+          persist-credentials: false
+          ref: e4980431b3e1a20dd94b41cb7b9914bf916f762c
+          repository: daoa0601/node-guardrails
+      - name: Check out the sibling TypeScript Quality dependency
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: ts-quality
+          persist-credentials: false
+          ref: 310520ed4f106512a25b524fd1689574e97835d9
+          repository: daoa0601/ts-quality
       - name: Install pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
@@ -55,8 +72,18 @@ jobs:
           cache: pnpm
           cache-dependency-path: templar/pnpm-lock.yaml
           node-version: ${{ matrix.node-version }}
+      - name: Build the sibling Node Guardrails module
+        working-directory: node-guardrails
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
       - name: Build the sibling Agent Blocks module
         working-directory: agent-blocks
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Build the sibling Drone Client module
+        working-directory: drone-client
         run: |
           pnpm install --frozen-lockfile
           pnpm build
@@ -83,8 +110,29 @@ jobs:
         with:
           path: agent-blocks
           persist-credentials: false
-          ref: 855ee9ba2a9a1a34e74cdb36c5513d08468bc7af
-          repository: ${{ env.AGENT_BLOCKS_REPOSITORY }}
+          ref: 83325593b8df1062a5e2ceabb649f86d23a526f4
+          repository: daoa0601/agent-blocks
+      - name: Check out the sibling Drone Client dependency
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: drone-client
+          persist-credentials: false
+          ref: 6f7308cf367b2e1674ca53bfc8929efa91e0e961
+          repository: daoa0601/drone-client
+      - name: Check out the sibling Node Guardrails dependency
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: node-guardrails
+          persist-credentials: false
+          ref: e4980431b3e1a20dd94b41cb7b9914bf916f762c
+          repository: daoa0601/node-guardrails
+      - name: Check out the sibling TypeScript Quality dependency
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: ts-quality
+          persist-credentials: false
+          ref: 310520ed4f106512a25b524fd1689574e97835d9
+          repository: daoa0601/ts-quality
       - name: Install pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
