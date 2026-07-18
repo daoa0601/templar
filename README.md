@@ -358,6 +358,31 @@ Parallels can later be added inside Drone as a Windows-only provider without cha
 workflow boundary. Other dynamic workflows remain `requires_lab` until they gain the same
 declared-operation and approval integration.
 
+## Security team composition
+
+Templar uses Agent Blocks' generic `block -> member -> team -> organization` hierarchy, but keeps
+all security meaning local to this repository. Each workflow block has one concrete member owner,
+one logical agent ID, one scoped-worktree role, and one phase. The workflow role allowlist and
+supervisor sequence are derived from that plan rather than maintained as a second loose catalog.
+At runtime, a fail-closed guard requires the complete next phase with the exact declared agent IDs,
+roles, and pinned review targets; an invented member, skipped phase, or early acceptance stops the
+run and emits a durable guard event.
+
+The source-security audit roster is:
+
+| Team      | Members                                                                   | Responsibility                                                                                  |
+| --------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Purple    | `attack_surface_coordinator`                                              | Produce the shared entry-point, input, control, and trust-boundary map.                         |
+| Red       | `injection_specialist`, `boundary_specialist`, `authorization_specialist` | Develop attacker-oriented leads without executing target code.                                  |
+| Blue      | `finding_falsifier_a`, `finding_falsifier_b`                              | Independently disprove leads and complete the defensive surface disposition.                    |
+| Assurance | `evaluation_auditor_a`, `evaluation_auditor_b`                            | Audit one pinned result each, rerun the trusted evaluator, and remain independent of selection. |
+
+PCAP triage uses purple-team evidence coordination followed by two blue-team analysts. Source fix
+uses purple-team remediation planning, two blue-team implementation members, and two independent
+assurance members. The exported vocabulary also reserves reverse-engineering and network-analysis
+teams for future plans. Public composition lives in `src/security-teams.ts`; active testing remains
+disabled unless the separate rules-of-engagement, lab, and human-approval gates all pass.
+
 ## Evaluation and promotion
 
 `telecom_incident` retains its four-round researcher/candidate/reviewer flow. Security triage is

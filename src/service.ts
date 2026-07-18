@@ -70,6 +70,8 @@ import {
   initializeTelecomIncidentWorkspace,
 } from "./workspace.js";
 import { DeterministicSelectionRuntime } from "./selection-guard.js";
+import { SecurityTeamRuntime } from "./security-team-guard.js";
+import { findSecurityTeamPlan } from "./security-teams.js";
 
 type RunFiber = EffectFiber<unknown, unknown>;
 
@@ -508,10 +510,15 @@ export class TemplarService {
       const runId = createRunId();
       const { workflow, requirePinnedAuditors } = await prepare(runId);
       const suppliedRuntime = this.#runtimeFactory?.(runId, workflow.name);
-      const runtime = new DeterministicSelectionRuntime(
+      const selectionRuntime = new DeterministicSelectionRuntime(
         suppliedRuntime ?? makeCodexRuntime(workflow.codex),
         { requirePinnedAuditors },
       );
+      const teamPlan = findSecurityTeamPlan(workflow.name);
+      const runtime =
+        teamPlan === undefined
+          ? selectionRuntime
+          : new SecurityTeamRuntime(selectionRuntime, teamPlan);
       const orchestration = runOrchestration({
         workflow,
         harnessHome: this.config.harnessHome,

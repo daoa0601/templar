@@ -34,6 +34,7 @@ export interface WorkflowCatalogEntry {
   readonly version: string;
   readonly family: WorkflowFamily;
   readonly description: string;
+  readonly agentOrganizationId?: string;
   readonly inputSchemaId: string;
   readonly outputSchemaId: string;
   readonly requiredCapability: CapabilityClass;
@@ -167,6 +168,7 @@ export const WORKFLOW_CATALOG: ReadonlyArray<WorkflowCatalogEntry> = [
     version: "1.0.0",
     family: "blue_team",
     description: "Passive security triage of one locally staged classic PCAP.",
+    agentOrganizationId: "pcap_security_triage",
     inputSchemaId: "templar://pcap_security_triage/PcapSecurityTriageInput/v1",
     outputSchemaId: "templar://pcap_security_triage/PcapSecurityTriageResult/v1",
     requiredCapability: "PASSIVE_READ",
@@ -206,6 +208,7 @@ export const WORKFLOW_CATALOG: ReadonlyArray<WorkflowCatalogEntry> = [
     family: "blue_team",
     description:
       "Attacker-oriented static source audit with scoped hunt tracks and independent falsification.",
+    agentOrganizationId: "source_security_audit",
     inputSchemaId: "templar://source_security_audit/SourceSecurityAuditInput/v1",
     outputSchemaId: "templar://source_security_audit/SourceSecurityAuditResult/v1",
     requiredCapability: "RE_STATIC",
@@ -226,6 +229,7 @@ export const WORKFLOW_CATALOG: ReadonlyArray<WorkflowCatalogEntry> = [
     family: "blue_team",
     description:
       "Create isolated source patches and regression tests for every accepted static-audit finding.",
+    agentOrganizationId: "source_security_fix",
     inputSchemaId: "templar://source_security_fix/SourceSecurityFixInput/v1",
     outputSchemaId: "templar://source_security_fix/SourceSecurityFixResult/v1",
     requiredCapability: "RE_STATIC",
