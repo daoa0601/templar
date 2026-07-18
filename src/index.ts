@@ -7,6 +7,7 @@ export * from "./course-analyzers.js";
 export * from "./course-corpus.js";
 export * from "./course-evidence.js";
 export * from "./course-grade.js";
+export * from "./course-lab.js";
 export * from "./darkwood-batch.js";
 export * from "./evidence.js";
 export * from "./errors.js";

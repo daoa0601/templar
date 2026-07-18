@@ -80,6 +80,14 @@ const EXERCISE_SOLVE_BUDGET: WorkflowBudgets = {
   maxTokens: 300_000,
 };
 
+const COURSE_ASSIGNMENT_EVALUATION_BUDGET: WorkflowBudgets = {
+  wallClockSeconds: 3_600,
+  maxTurns: 6,
+  maxTokens: 700_000,
+  maxConcurrency: 2,
+  maxOutputBytes: 6 * 1024 * 1024,
+};
+
 const COURSE_SECURITY_EVALUATION_BUDGET: WorkflowBudgets = {
   wallClockSeconds: 3_600,
   maxTurns: 9,
@@ -208,6 +216,27 @@ export const WORKFLOW_CATALOG: ReadonlyArray<WorkflowCatalogEntry> = [
     traceAuditorRequired: false,
     persistencePolicy: "bounded_case_record",
     dataSensitivityPolicy: "operational",
+    releaseState: "enabled",
+  }),
+  entry({
+    id: "course_assignment_evaluation",
+    version: "1.0.0",
+    family: "reverse_engineering",
+    description:
+      "One attested passive course assignment with red-team falsification, independent blue-team solutions, and assurance.",
+    agentOrganizationId: "course_assignment_evaluation",
+    inputSchemaId: "templar://exercise_solve/ExerciseSolveInput/v1",
+    outputSchemaId: "templar://exercise_solve/ExerciseCandidateResult/v1",
+    requiredCapability: "RE_STATIC",
+    authorizationCheckpoint: "attested_course_assignment_evidence_scope",
+    networkMode: "denied",
+    filesystemMode: "isolated_candidate_worktree",
+    toolAllowlist: [],
+    budgets: COURSE_ASSIGNMENT_EVALUATION_BUDGET,
+    evaluatorRequired: true,
+    traceAuditorRequired: true,
+    persistencePolicy: "bounded_case_record",
+    dataSensitivityPolicy: "sensitive_quarantine",
     releaseState: "enabled",
   }),
   entry({

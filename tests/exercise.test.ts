@@ -119,10 +119,23 @@ describe("bounded exercise snapshots", () => {
       encoding: "utf8",
     });
     expect(tracked.stdout).toContain("exercise.json");
+    expect(tracked.stdout).toContain("observations/index.json");
     expect(tracked.stdout).not.toMatch(/\.exe|\.bin|course-material/iu);
     expect(
       await readFile(path.join(workspace.root, "CANDIDATE_INSTRUCTIONS.md"), "utf8"),
     ).not.toContain("/Users/");
+    const observationIndex = JSON.parse(
+      await readFile(path.join(workspace.root, "observations", "index.json"), "utf8"),
+    ) as {
+      observations: ReadonlyArray<{ readonly file: string; readonly encoding: string }>;
+    };
+    expect(observationIndex.observations[0]!.encoding).toBe("raw-utf8-v1");
+    expect(
+      await readFile(
+        path.join(workspace.root, "observations", observationIndex.observations[0]!.file),
+        "utf8",
+      ),
+    ).toBe(exerciseSnapshot().observations[0]!.text);
 
     await writeCandidate(workspace.root);
     expect(await evaluate(workspace.root)).toMatchObject({
@@ -131,6 +144,49 @@ describe("bounded exercise snapshots", () => {
       evaluator_version: "exercise-evaluator-v2",
       coverage: { evidence_checks: 1, candidate_checks: 1 },
     });
+  });
+
+  it("materializes long observation strings as reconstructable line-bounded evidence", async () => {
+    const templarHome = await temporaryDirectory("templar-exercise-chunks-");
+    const snapshot = exerciseSnapshot();
+    const longText = `${"A".repeat(2_500)}\n${"β".repeat(2_500)}`;
+    const workspace = await initializeExerciseSolveWorkspace({
+      templarHome,
+      runId: "exercise-chunks-test",
+      snapshot: {
+        ...snapshot,
+        observations: [
+          { ...snapshot.observations[0]!, text: longText },
+          ...snapshot.observations.slice(1),
+        ],
+      },
+    });
+    const index = JSON.parse(
+      await readFile(path.join(workspace.root, "observations", "index.json"), "utf8"),
+    ) as {
+      observations: ReadonlyArray<{ readonly file: string; readonly digest: string }>;
+    };
+    const mirror = await readFile(
+      path.join(workspace.root, "observations", index.observations[0]!.file),
+      "utf8",
+    );
+    expect(
+      Math.max(
+        ...mirror
+          .trimEnd()
+          .split("\n")
+          .map((line) => line.length),
+      ),
+    ).toBeLessThan(2_000);
+    const reconstructed = mirror
+      .trimEnd()
+      .split("\n")
+      .map((line) => (JSON.parse(line) as { text: string }).text)
+      .join("");
+    expect(reconstructed).toBe(longText);
+    expect(index.observations[0]!.digest).toBe(
+      `sha256:${createHash("sha256").update(longText, "utf8").digest("hex")}`,
+    );
   });
 
   it("rejects unknown evidence and incomplete answers", async () => {

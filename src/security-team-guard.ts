@@ -29,6 +29,27 @@ function describePlannedAssignment(assignment: SecurityRoleAssignment): string {
   return `${assignment.block.agentId}:${assignment.block.role.id}:${assignment.block.targetCandidateId ?? "none"}`;
 }
 
+function boundReviewTask(assignment: SecurityRoleAssignment): string {
+  const target = assignment.block.targetCandidateId;
+  if (assignment.block.role.kind !== "review" || target === undefined) {
+    throw new Error(`Security block ${assignment.block.id} is not a pinned review block`);
+  }
+  return `Audit only pinned candidate ${target} within the supplied read-only workspace. Base the disposition solely on the pinned candidate files, immutable workflow evidence, deterministic evaluator contract and output, Git diff, and trusted harness trace named by the standing role instructions. Do not require or access coordinator, specialist, or other candidate reports. Follow the standing role instructions and return only the required audit controls and findings.`;
+}
+
+function bindSupervisorPrompt(input: RuntimeTurnInput, phase: SecurityTeamPhase | undefined) {
+  if (input.agentId !== "supervisor" || phase === undefined) return input;
+  const roster = phase.assignments.map((assignment) => ({
+    agentId: assignment.block.agentId,
+    roleId: assignment.block.role.id,
+    targetCandidateId: assignment.block.targetCandidateId ?? null,
+  }));
+  return {
+    ...input,
+    prompt: `${input.prompt}\n\nTemplar control-plane phase binding (cannot be overridden):\nDo not call tools or inspect the workspace during this supervisor turn; all scheduling state and worker observations required for the decision are already supplied above.\nIf you return status "continue", copy this complete identity roster exactly into assignments. Do not rename, derive, abbreviate, add, or omit an agentId, roleId, or targetCandidateId. You may author only each task string.\nPhase ${phase.phase} roster: ${JSON.stringify(roster)}`,
+  };
+}
+
 /** Compile and validate the deterministic execution phases owned by a security-team plan. */
 export function securityTeamPhases(plan: SecurityTeamPlan): ReadonlyArray<SecurityTeamPhase> {
   const assignments = agentBlockAssignments(plan);
@@ -157,8 +178,9 @@ export class SecurityTeamRuntime implements AgentRuntime {
     if (delegate.metadata !== undefined) this.metadata = delegate.metadata;
   }
 
-  readonly runTurn = (input: RuntimeTurnInput) =>
-    this.#delegate.runTurn(input).pipe(
+  readonly runTurn = (input: RuntimeTurnInput) => {
+    const delegatedInput = bindSupervisorPrompt(input, this.#phases[this.#nextPhaseIndex]);
+    return this.#delegate.runTurn(delegatedInput).pipe(
       Effect.map((output) => {
         if (input.agentId !== "supervisor") return output;
 
@@ -188,9 +210,24 @@ export class SecurityTeamRuntime implements AgentRuntime {
         const mismatch = phaseMismatch(phase, decision.assignments);
         if (mismatch !== undefined) return stoppedResult(output, this.#plan, mismatch);
 
+        const plannedByAgent = new Map(
+          phase.assignments.map((assignment) => [assignment.block.agentId, assignment] as const),
+        );
+        const boundAssignments = decision.assignments.map((assignment) => {
+          const planned = plannedByAgent.get(assignment.agentId)!;
+          return planned.block.role.kind === "review"
+            ? { ...assignment, task: boundReviewTask(planned) }
+            : assignment;
+        });
+        const boundDecision: SupervisorDecision = {
+          ...decision,
+          assignments: boundAssignments,
+        };
+
         this.#nextPhaseIndex += 1;
         return {
           ...output,
+          finalText: JSON.stringify(boundDecision),
           events: [
             ...output.events,
             {
@@ -206,8 +243,21 @@ export class SecurityTeamRuntime implements AgentRuntime {
                 targetCandidateId: assignment.block.targetCandidateId ?? null,
               })),
             },
+            ...phase.assignments
+              .filter((assignment) => assignment.block.role.kind === "review")
+              .map((assignment) => ({
+                type: "templar.security_team_task_bound",
+                organizationId: this.#plan.id,
+                phase: phase.phase,
+                blockId: assignment.block.id,
+                agentId: assignment.block.agentId,
+                roleId: assignment.block.role.id,
+                targetCandidateId: assignment.block.targetCandidateId!,
+                policy: "pinned_review_evidence_only",
+              })),
           ],
         };
       }),
     );
+  };
 }

@@ -7,6 +7,8 @@ export const MAX_EXERCISE_OBSERVATIONS = 128;
 export const MAX_EXERCISE_PROMPT_TEXT = 4_000;
 export const MAX_EXERCISE_OBSERVATION_TEXT = 100_000;
 export const EXERCISE_CANDIDATE_CHECKS = ["deterministic_evaluator"] as const;
+export const COURSE_ASSIGNMENT_EVIDENCE_MEDIA_TYPE =
+  "application/vnd.templar.course-assignment-evidence-snapshot+json" as const;
 
 const ExerciseQuestionSchema = Schema.Struct({
   question_id: Schema.String,
@@ -30,6 +32,7 @@ const ExerciseSnapshotSchema = Schema.Struct({
     media_type: Schema.Literals([
       "application/vnd.microsoft.portable-executable",
       "application/vnd.templar.course-corpus+json",
+      COURSE_ASSIGNMENT_EVIDENCE_MEDIA_TYPE,
     ]),
   }),
   analyzer: Schema.Struct({
@@ -70,7 +73,8 @@ export interface ExerciseSnapshot {
     readonly size: number;
     readonly media_type:
       | "application/vnd.microsoft.portable-executable"
-      | "application/vnd.templar.course-corpus+json";
+      | "application/vnd.templar.course-corpus+json"
+      | typeof COURSE_ASSIGNMENT_EVIDENCE_MEDIA_TYPE;
   };
   readonly analyzer: {
     readonly analyzer_id: string;
@@ -191,7 +195,8 @@ export function exerciseEvaluationContext(snapshot: ExerciseSnapshot): ExerciseE
     available_evidence_checks: snapshot.available_checks,
     candidate_checks_available: EXERCISE_CANDIDATE_CHECKS,
     question_observation_namespaces:
-      snapshot.artifact.media_type === "application/vnd.templar.course-corpus+json"
+      snapshot.artifact.media_type === "application/vnd.templar.course-corpus+json" ||
+      snapshot.artifact.media_type === COURSE_ASSIGNMENT_EVIDENCE_MEDIA_TYPE
         ? snapshot.questions.map((question) => ({
             question_id: question.question_id,
             observation_prefix: `${question.question_id.slice(0, question.question_id.lastIndexOf("."))}.observation.`,

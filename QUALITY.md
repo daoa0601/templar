@@ -47,6 +47,11 @@ contract, security-team guard, and candidate evaluator. Real Codex and OpenCode 
 opt-in evaluations: they consume external subscription/provider usage, may take up to the declared
 one-hour course budget, and are never part of CI or `pnpm preflight`.
 
+Course-lab tests use a fake Drone transport. They prove approval-before-upload, live attestation
+matching, strict operation shape, private custody, job/input correlation, assignment-evidence
+validation, and per-job execution-attestation correlation without executing a specimen or invoking a
+model provider.
+
 `pnpm hooks:install` installs the package-owned managed hooks into this checkout's active Git hooks
 directory:
 

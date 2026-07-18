@@ -5,6 +5,7 @@ import {
 } from "@agentic-orch/drone-client";
 import type {
   DroneCallOptions,
+  DroneArtifactDownload,
   DroneClientOptions,
   DroneArtifactMetadata,
   DroneJob,
@@ -16,6 +17,7 @@ import type {
 import { invalidInput, TemplarError } from "./errors.js";
 
 export type {
+  DroneArtifactDownload,
   DroneArtifactMetadata,
   DroneJob,
   DroneJobSubmission,
@@ -55,6 +57,7 @@ export function droneUnavailableStatus(reason: string): DroneProviderStatus {
     installed: false,
     enabled: false,
     mutations_available: false,
+    attested: false,
     reason,
     isolation: "lightweight_vm",
     guest_os: ["linux"],
@@ -97,6 +100,17 @@ export class DroneClient {
   ): Promise<DroneArtifactMetadata> {
     try {
       return await this.#client.stageArtifact(bytes, mediaType, options);
+    } catch (cause) {
+      throw mappedError(cause);
+    }
+  }
+
+  async artifactContent(
+    artifactId: string,
+    options: DroneCallOptions = {},
+  ): Promise<DroneArtifactDownload> {
+    try {
+      return await this.#client.artifactContent(artifactId, options);
     } catch (cause) {
       throw mappedError(cause);
     }

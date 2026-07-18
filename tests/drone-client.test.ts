@@ -24,6 +24,15 @@ describe("Drone client boundary", () => {
             installed: true,
             enabled: true,
             mutations_available: true,
+            attested: true,
+            attestation: {
+              attestation_id: `attestation.sha256.${"c".repeat(64)}`,
+              profile: "apple_native_no_network_vm_v1",
+              key_id: `ed25519.sha256.${"d".repeat(64)}`,
+              issuer: "fixture-independent-attestor",
+              issued_at: "2026-07-18T08:00:00.000Z",
+              expires_at: "2026-07-25T08:00:00.000Z",
+            },
             reason: "ready",
             isolation: "lightweight_vm",
             guest_os: ["linux"],
@@ -50,6 +59,7 @@ describe("Drone client boundary", () => {
       expect(JSON.parse(String(init?.body))).toEqual({
         schema_version: "1",
         operation_id: "pe.static_snapshot",
+        provider_attestation_id: `attestation.sha256.${"c".repeat(64)}`,
         inputs: { sample: `sha256_${"a".repeat(64)}` },
       });
       return new Response(
@@ -58,6 +68,7 @@ describe("Drone client boundary", () => {
           job_id: `job_${"b".repeat(32)}`,
           operation_id: "pe.static_snapshot",
           provider_id: "apple_native",
+          provider_attestation_id: `attestation.sha256.${"c".repeat(64)}`,
           status: "queued",
           inputs: { sample: `sha256_${"a".repeat(64)}` },
           outputs: [],
@@ -76,16 +87,23 @@ describe("Drone client boundary", () => {
       client.submitJob({
         schema_version: "1",
         operation_id: "pe.static_snapshot",
+        provider_attestation_id: `attestation.sha256.${"c".repeat(64)}`,
         inputs: { sample: `sha256_${"a".repeat(64)}` },
       }),
     ).resolves.toMatchObject({ status: "queued" });
     await expect(
-      client.submitJob({ schema_version: "1", operation_id: "../escape", inputs: {} }),
+      client.submitJob({
+        schema_version: "1",
+        operation_id: "../escape",
+        provider_attestation_id: `attestation.sha256.${"c".repeat(64)}`,
+        inputs: {},
+      }),
     ).rejects.toMatchObject({ code: "INVALID_INPUT" });
     await expect(
       client.submitJob({
         schema_version: "1",
         operation_id: "pe.static_snapshot",
+        provider_attestation_id: `attestation.sha256.${"c".repeat(64)}`,
         inputs: { sample: "mutable-file-name" },
       }),
     ).rejects.toMatchObject({ code: "INVALID_INPUT" });
@@ -158,6 +176,7 @@ describe("Drone client boundary", () => {
           job_id: jobId,
           operation_id: "source.validate",
           provider_id: "apple_native",
+          provider_attestation_id: `attestation.sha256.${"c".repeat(64)}`,
           status: "running",
           inputs: { source: artifactId },
           outputs: [],
@@ -202,6 +221,7 @@ describe("Drone client boundary", () => {
       provider_id: "drone",
       enabled: false,
       mutations_available: false,
+      attested: false,
       reason: "service_unavailable",
     });
   });

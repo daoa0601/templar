@@ -380,19 +380,48 @@ describe("source security fix workflow", () => {
       };
     });
     const submitJob = vi.fn(
-      async (input: { operation_id: string; inputs: Record<string, string> }) => ({
-        schema_version: "1" as const,
-        job_id: jobId,
-        operation_id: input.operation_id,
-        provider_id: "apple_native",
-        status: "queued" as const,
-        inputs: input.inputs,
-        outputs: [],
-        submitted_at: "2026-07-18T10:00:01.000Z",
-      }),
+      async (input: {
+        operation_id: string;
+        provider_attestation_id: string;
+        inputs: Record<string, string>;
+      }) => {
+        expect(input.provider_attestation_id).toBe(`attestation.sha256.${"c".repeat(64)}`);
+        return {
+          schema_version: "1" as const,
+          job_id: jobId,
+          operation_id: input.operation_id,
+          provider_id: "apple_native",
+          provider_attestation_id: `attestation.sha256.${"c".repeat(64)}`,
+          status: "queued" as const,
+          inputs: input.inputs,
+          outputs: [],
+          submitted_at: "2026-07-18T10:00:01.000Z",
+        };
+      },
     );
     const drone = {
-      providers: async () => [],
+      providers: async () => [
+        {
+          provider_id: "apple_native" as const,
+          product: "Apple Containerization",
+          installed: true,
+          enabled: true,
+          mutations_available: true,
+          attested: true,
+          attestation: {
+            attestation_id: `attestation.sha256.${"c".repeat(64)}`,
+            profile: "apple_native_no_network_vm_v1" as const,
+            key_id: `ed25519.sha256.${"b".repeat(64)}`,
+            issuer: "fixture-independent-attestor",
+            issued_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          },
+          reason: "ready",
+          isolation: "lightweight_vm" as const,
+          guest_os: ["linux" as const],
+          network_modes: ["none" as const],
+        },
+      ],
       operations: async () => [operation],
       stageArtifact,
       submitJob,
@@ -401,6 +430,7 @@ describe("source security fix workflow", () => {
         job_id: jobId,
         operation_id: operation.operation_id,
         provider_id: "apple_native",
+        provider_attestation_id: `attestation.sha256.${"c".repeat(64)}`,
         status: "succeeded" as const,
         inputs: { source: stagedArtifactId },
         outputs: [
@@ -416,6 +446,7 @@ describe("source security fix workflow", () => {
         finished_at: "2026-07-18T10:00:03.000Z",
         exit_code: 0,
         timed_out: false,
+        execution_attestation_artifact_id: `sha256_${"f".repeat(64)}`,
       }),
     };
     const config = await testConfig({

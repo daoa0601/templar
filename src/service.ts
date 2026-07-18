@@ -31,6 +31,7 @@ import type { TemplarConfig } from "./config.js";
 import { requiresHumanAcknowledgment, workflowEntry } from "./catalog.js";
 import { assertCourseExerciseSnapshot, isCourseExerciseSnapshot } from "./course-evidence.js";
 import { loadCourseCorpusManifest } from "./course-corpus.js";
+import { assertCourseLabExerciseSnapshot } from "./course-lab.js";
 import type {
   ExerciseSolveInput,
   IncidentInput,
@@ -42,6 +43,7 @@ import { isSourceSnapshotId } from "./contracts.js";
 import { DroneClient, droneUnavailableStatus } from "./drone-client.js";
 import type { DroneJob, DroneProviderStatus } from "./drone-client.js";
 import { TemplarError } from "./errors.js";
+import { COURSE_ASSIGNMENT_EVIDENCE_MEDIA_TYPE } from "./exercise.js";
 import { ExerciseSnapshotStore } from "./exercise-store.js";
 import type { StoredExerciseSnapshot } from "./exercise-store.js";
 import { analyzeClassicPcapBytes } from "./pcap-analyzer.js";
@@ -58,6 +60,7 @@ import {
   validationRationale,
 } from "./source-validation.js";
 import {
+  courseAssignmentEvaluationWorkflow,
   courseSecurityEvaluationWorkflow,
   exerciseSolveWorkflow,
   pcapSecurityTriageWorkflow,
@@ -134,6 +137,7 @@ export interface SourceFixValidationRequestView {
   readonly schema_version: "1";
   readonly run_id: string;
   readonly operation_id: string;
+  readonly provider_attestation_id: string;
   readonly source_artifact_id: string;
   readonly job_id: string;
   readonly requested_at: string;
@@ -158,6 +162,7 @@ export class TemplarService {
   readonly #runtimeFactory:
     ((runId: string, workflowId: string) => AgentRuntime | undefined) | undefined;
   readonly #courseModel: string | undefined;
+  readonly #courseAssignmentModel: string | undefined;
   readonly #drone: TemplarDroneClient;
   readonly #active = new Map<string, RunFiber>();
   readonly #validationSubmissions = new Map<string, Promise<SourceFixValidationView>>();
@@ -169,6 +174,7 @@ export class TemplarService {
       readonly runtimeFactory?: (runId: string, workflowId: string) => AgentRuntime | undefined;
       readonly droneClient?: TemplarDroneClient;
       readonly courseModel?: string;
+      readonly courseAssignmentModel?: string;
     } = {},
   ) {
     this.config = config;
@@ -183,6 +189,7 @@ export class TemplarService {
     );
     this.#runtimeFactory = options.runtimeFactory;
     this.#courseModel = options.courseModel;
+    this.#courseAssignmentModel = options.courseAssignmentModel;
     this.#drone =
       options.droneClient ??
       new DroneClient({
@@ -268,14 +275,22 @@ export class TemplarService {
     return this.#submit(async (runId) => {
       const snapshot = await this.exercises.resolve(input.exercise_snapshot_id);
       const course = isCourseExerciseSnapshot(snapshot);
-      if (course) {
-        assertCourseExerciseSnapshot(snapshot, await loadCourseCorpusManifest());
+      const courseAssignment =
+        snapshot.artifact.media_type === COURSE_ASSIGNMENT_EVIDENCE_MEDIA_TYPE;
+      const manifest = course || courseAssignment ? await loadCourseCorpusManifest() : undefined;
+      if (course && manifest !== undefined) assertCourseExerciseSnapshot(snapshot, manifest);
+      if (courseAssignment && manifest !== undefined) {
+        assertCourseLabExerciseSnapshot(snapshot, manifest);
       }
       const workspace = await initializeExerciseSolveWorkspace({
         templarHome: this.config.templarHome,
         runId,
         snapshot,
-        ...(course ? { workflowId: "course_security_evaluation" as const } : {}),
+        ...(course
+          ? { workflowId: "course_security_evaluation" as const }
+          : courseAssignment
+            ? { workflowId: "course_assignment_evaluation" as const }
+            : {}),
       });
       return {
         workflow: course
@@ -283,8 +298,15 @@ export class TemplarService {
               workspace,
               this.#courseModel === undefined ? {} : { model: this.#courseModel },
             )
-          : exerciseSolveWorkflow(workspace),
-        requirePinnedAuditors: course,
+          : courseAssignment
+            ? courseAssignmentEvaluationWorkflow(
+                workspace,
+                this.#courseAssignmentModel === undefined
+                  ? {}
+                  : { model: this.#courseAssignmentModel },
+              )
+            : exerciseSolveWorkflow(workspace),
+        requirePinnedAuditors: course || courseAssignment,
       };
     });
   }
@@ -422,9 +444,26 @@ export class TemplarService {
       repository: snapshot.repository,
       maximumBytes: this.config.maxSourceSnapshotBytes,
     });
-    const operation = (await this.#drone.operations()).find(
-      (candidate) => candidate.operation_id === operationId,
-    );
+    const [providers, operations] = await Promise.all([
+      this.#drone.providers(),
+      this.#drone.operations(),
+    ]);
+    const provider = providers.find((candidate) => candidate.provider_id === "apple_native");
+    if (
+      provider === undefined ||
+      !provider.mutations_available ||
+      !provider.attested ||
+      provider.attestation === undefined ||
+      provider.attestation.profile !== "apple_native_no_network_vm_v1" ||
+      new Date(provider.attestation.expires_at).valueOf() <= Date.now()
+    ) {
+      throw new TemplarError({
+        code: "CONFLICT",
+        message: "Drone source validation requires a current independently attested provider.",
+        status: 409,
+      });
+    }
+    const operation = operations.find((candidate) => candidate.operation_id === operationId);
     if (operation === undefined) {
       throw new TemplarError({
         code: "CONFLICT",
@@ -437,12 +476,22 @@ export class TemplarService {
     const job = await this.#drone.submitJob({
       schema_version: "1",
       operation_id: operationId,
+      provider_attestation_id: provider.attestation.attestation_id,
       inputs: { [SOURCE_VALIDATION_INPUT_SLOT]: artifact.artifact_id },
     });
+    if (job.provider_attestation_id !== provider.attestation.attestation_id) {
+      throw new TemplarError({
+        code: "SERVICE_UNAVAILABLE",
+        message: "Drone returned a source-validation job under an unrelated attestation.",
+        status: 503,
+        expose: false,
+      });
+    }
     const request: SourceFixValidationRequestView = {
       schema_version: "1",
       run_id: runId,
       operation_id: operationId,
+      provider_attestation_id: job.provider_attestation_id,
       source_artifact_id: artifact.artifact_id,
       job_id: job.job_id,
       requested_at: job.submitted_at,
@@ -495,6 +544,7 @@ export class TemplarService {
     const job = await this.#drone.job(request.job_id);
     if (
       job.operation_id !== request.operation_id ||
+      job.provider_attestation_id !== request.provider_attestation_id ||
       job.inputs[SOURCE_VALIDATION_INPUT_SLOT] !== request.source_artifact_id
     ) {
       throw new TemplarError({
@@ -823,6 +873,7 @@ export class TemplarService {
       const expected = [
         "job_id",
         "operation_id",
+        "provider_attestation_id",
         "rationale",
         "requested_at",
         "run_id",
@@ -837,6 +888,8 @@ export class TemplarService {
         !/^[a-z][a-z0-9_.-]{0,127}$/u.test(parsed.operation_id) ||
         typeof parsed.source_artifact_id !== "string" ||
         !/^sha256_[a-f0-9]{64}$/u.test(parsed.source_artifact_id) ||
+        typeof parsed.provider_attestation_id !== "string" ||
+        !/^attestation\.sha256\.[a-f0-9]{64}$/u.test(parsed.provider_attestation_id) ||
         typeof parsed.job_id !== "string" ||
         !/^job_[a-f0-9]{32}$/u.test(parsed.job_id) ||
         typeof parsed.requested_at !== "string" ||

@@ -17,12 +17,14 @@ export interface TemplarConfig {
   readonly maxPcapBytes: number;
   readonly maxPcapPackets: number;
   readonly maxExerciseSnapshotBytes: number;
+  readonly maxCourseLabSpecimenBytes: number;
   readonly maxSourceSnapshotBytes: number;
   readonly droneEnabled: boolean;
   readonly droneUrl: string;
   readonly droneToken?: string;
   readonly droneTimeoutMs: number;
   readonly droneSourceValidationOperationId?: string;
+  readonly droneCourseLabOperationId?: string;
 }
 
 function integer(value: string | undefined, fallback: number, label: string): number {
@@ -53,6 +55,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Templa
   const droneToken = environment.TEMPLAR_DRONE_TOKEN?.trim();
   const droneSourceValidationOperationId =
     environment.TEMPLAR_DRONE_SOURCE_VALIDATION_OPERATION_ID?.trim();
+  const droneCourseLabOperationId = environment.TEMPLAR_DRONE_COURSE_LAB_OPERATION_ID?.trim();
   if (!isLoopbackHost(host) && !token) {
     throw invalidInput("TEMPLAR_BEARER_TOKEN is required when TEMPLAR_HOST is not loopback.");
   }
@@ -64,6 +67,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Templa
     throw invalidInput(
       "TEMPLAR_DRONE_SOURCE_VALIDATION_OPERATION_ID must be a safe Drone operation ID.",
     );
+  }
+  if (
+    droneCourseLabOperationId !== undefined &&
+    droneCourseLabOperationId.length > 0 &&
+    !/^[a-z][a-z0-9_.-]{0,127}$/u.test(droneCourseLabOperationId)
+  ) {
+    throw invalidInput("TEMPLAR_DRONE_COURSE_LAB_OPERATION_ID must be a safe Drone operation ID.");
   }
   return {
     host,
@@ -91,6 +101,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Templa
       512 * 1024,
       "TEMPLAR_MAX_EXERCISE_SNAPSHOT_BYTES",
     ),
+    maxCourseLabSpecimenBytes: integer(
+      environment.TEMPLAR_MAX_COURSE_LAB_SPECIMEN_BYTES,
+      256 * 1024 * 1024,
+      "TEMPLAR_MAX_COURSE_LAB_SPECIMEN_BYTES",
+    ),
     maxSourceSnapshotBytes: integer(
       environment.TEMPLAR_MAX_SOURCE_SNAPSHOT_BYTES,
       8 * 1024 * 1024,
@@ -108,5 +123,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Templa
     droneSourceValidationOperationId.length === 0
       ? {}
       : { droneSourceValidationOperationId }),
+    ...(droneCourseLabOperationId === undefined || droneCourseLabOperationId.length === 0
+      ? {}
+      : { droneCourseLabOperationId }),
   };
 }

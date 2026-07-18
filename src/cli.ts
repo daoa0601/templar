@@ -9,7 +9,9 @@ import { loadConfig } from "./config.js";
 import { decodeExerciseSolveInput, decodeIncidentInput } from "./contracts.js";
 import { buildCourseExerciseSnapshot } from "./course-evidence.js";
 import { gradeCourseCandidate } from "./course-grade.js";
+import { CourseLabController } from "./course-lab.js";
 import { inventoryCourseCorpus, loadCourseCorpusManifest } from "./course-corpus.js";
+import { DroneClient } from "./drone-client.js";
 import { ScriptedTemplarRuntime } from "./fake-runtime.js";
 import { startHttpServer } from "./http.js";
 import { TemplarService } from "./service.js";
@@ -96,7 +98,7 @@ function courseRunOptions(args: ReadonlyArray<string>): {
 } {
   if (args.length % 2 !== 0) {
     throw new Error(
-      "Usage: templar course [solve|demo] <snapshot.json> [--runtime codex|opencode] [--model <model>]",
+      "Usage: templar course [solve|demo] <snapshot.json> [--runtime codex|opencode] [--model <model>] or templar course lab solve <lab-id> [--runtime codex|opencode] [--model <model>]",
     );
   }
   const options = new Map<string, string>();
@@ -110,7 +112,7 @@ function courseRunOptions(args: ReadonlyArray<string>): {
       options.has(key)
     ) {
       throw new Error(
-        "Usage: templar course [solve|demo] <snapshot.json> [--runtime codex|opencode] [--model <model>]",
+        "Usage: templar course [solve|demo] <snapshot.json> [--runtime codex|opencode] [--model <model>] or templar course lab solve <lab-id> [--runtime codex|opencode] [--model <model>]",
       );
     }
     options.set(key, value);
@@ -124,6 +126,39 @@ function courseRunOptions(args: ReadonlyArray<string>): {
     runtime,
     model: configuredModel ?? (runtime === "opencode" ? "zai-coding-plan/glm-5.2" : undefined),
   };
+}
+
+function courseLabSubmitOptions(args: ReadonlyArray<string>): {
+  readonly approvedProviderAttestationId: string;
+  readonly rationale: string;
+} {
+  if (args.length !== 4) {
+    throw new Error(
+      "Usage: templar course lab submit <source-artifact-id> <specimen-file> <media-type> --approve-attestation <attestation-id> --rationale <text>",
+    );
+  }
+  const options = new Map<string, string>();
+  for (let index = 0; index < args.length; index += 2) {
+    const key = args[index];
+    const value = args[index + 1];
+    if (
+      key === undefined ||
+      value === undefined ||
+      !["--approve-attestation", "--rationale"].includes(key) ||
+      options.has(key)
+    ) {
+      throw new Error(
+        "Usage: templar course lab submit <source-artifact-id> <specimen-file> <media-type> --approve-attestation <attestation-id> --rationale <text>",
+      );
+    }
+    options.set(key, value);
+  }
+  const approvedProviderAttestationId = options.get("--approve-attestation");
+  const rationale = options.get("--rationale");
+  if (approvedProviderAttestationId === undefined || rationale === undefined) {
+    throw new Error("Course-lab submission requires attestation approval and a rationale.");
+  }
+  return { approvedProviderAttestationId, rationale };
 }
 
 async function main(): Promise<void> {
@@ -172,6 +207,99 @@ async function main(): Promise<void> {
     return;
   }
   const config = loadConfig();
+  const courseLab = (): CourseLabController =>
+    new CourseLabController(
+      config,
+      new DroneClient({
+        baseUrl: config.droneUrl,
+        ...(config.droneToken === undefined ? {} : { token: config.droneToken }),
+        timeoutMs: config.droneTimeoutMs,
+        maxArtifactResponseBytes: config.maxExerciseSnapshotBytes,
+      }),
+    );
+  if (command === "course" && process.argv[3] === "lab" && process.argv[4] === "submit") {
+    const sourceArtifactId = process.argv[5];
+    const specimenFile = process.argv[6];
+    const specimenMediaType = process.argv[7];
+    if (
+      sourceArtifactId === undefined ||
+      specimenFile === undefined ||
+      specimenMediaType === undefined
+    ) {
+      throw new Error(
+        "Usage: templar course lab submit <source-artifact-id> <specimen-file> <media-type> --approve-attestation <attestation-id> --rationale <text>",
+      );
+    }
+    const approval = courseLabSubmitOptions(process.argv.slice(8));
+    await emitJson(
+      await courseLab().submit({
+        sourceArtifactId,
+        specimenFile,
+        specimenMediaType,
+        ...approval,
+      }),
+    );
+    return;
+  }
+  if (command === "course" && process.argv[3] === "lab" && process.argv[4] === "status") {
+    const id = process.argv[5];
+    if (id === undefined || process.argv.length !== 6) {
+      throw new Error("Usage: templar course lab status <lab-id>");
+    }
+    await emitJson(await courseLab().status(id));
+    return;
+  }
+  if (command === "course" && process.argv[3] === "lab" && process.argv[4] === "collect") {
+    const id = process.argv[5];
+    const destination = process.argv[6];
+    if (id === undefined || destination === undefined || process.argv.length !== 7) {
+      throw new Error("Usage: templar course lab collect <lab-id> <assignment-evidence.json>");
+    }
+    await emitJson(await courseLab().collect(id, destination));
+    return;
+  }
+  if (command === "course" && process.argv[3] === "lab" && process.argv[4] === "snapshot") {
+    const id = process.argv[5];
+    const destination = process.argv[6];
+    if (id === undefined || destination === undefined || process.argv.length !== 7) {
+      throw new Error("Usage: templar course lab snapshot <lab-id> <exercise-snapshot.json>");
+    }
+    await emitJson(await courseLab().exerciseSnapshot(id), destination);
+    return;
+  }
+  if (command === "course" && process.argv[3] === "lab" && process.argv[4] === "solve") {
+    const id = process.argv[5];
+    if (id === undefined) {
+      throw new Error(
+        "Usage: templar course lab solve <lab-id> [--runtime codex|opencode] [--model <model>]",
+      );
+    }
+    const options = courseRunOptions(process.argv.slice(6));
+    const openCodeRuntime =
+      options.runtime === "opencode"
+        ? makeOpenCodeRuntime({
+            binary: process.env.TEMPLAR_OPENCODE_BINARY?.trim() || "opencode",
+            maxOutputBytes: 6 * 1024 * 1024,
+          })
+        : undefined;
+    const service = new TemplarService(config, {
+      ...(openCodeRuntime === undefined ? {} : { runtimeFactory: () => openCodeRuntime }),
+      ...(options.model === undefined ? {} : { courseAssignmentModel: options.model }),
+    });
+    await service.initialize();
+    const artifact = await service.stageExerciseSnapshot(await courseLab().exerciseSnapshot(id));
+    const submitted = await service.submitExerciseSolve(
+      decodeExerciseSolveInput({
+        schema_version: "1",
+        exercise_snapshot_id: artifact.artifact_id,
+      }),
+    );
+    process.stdout.write(
+      `${options.runtime === "opencode" ? "OpenCode-backed" : "Codex-backed"} attested course-assignment run ${submitted.run_id} started.\n`,
+    );
+    await wait(service, submitted.run_id);
+    return;
+  }
   if (command === "serve") {
     const service = new TemplarService(config);
     const server = await startHttpServer(service);
@@ -235,7 +363,7 @@ async function main(): Promise<void> {
     return;
   }
   process.stderr.write(
-    "Usage: templar [serve|sample|demo|course inventory <root>|course compose <root> <evidence.json> [snapshot.json]|course solve <snapshot.json> [--runtime codex|opencode] [--model <model>]|course demo <snapshot.json> [--runtime codex|opencode] [--model <model>]|course grade <result.json> <sealed-rubric.json>]\n",
+    "Usage: templar [serve|sample|demo|course inventory <root>|course compose <root> <evidence.json> [snapshot.json]|course lab submit <source-artifact-id> <specimen-file> <media-type> --approve-attestation <attestation-id> --rationale <text>|course lab status <lab-id>|course lab collect <lab-id> <assignment-evidence.json>|course lab snapshot <lab-id> <exercise-snapshot.json>|course lab solve <lab-id> [--runtime codex|opencode] [--model <model>]|course solve <snapshot.json> [--runtime codex|opencode] [--model <model>]|course demo <snapshot.json> [--runtime codex|opencode] [--model <model>]|course grade <result.json> <sealed-rubric.json>]\n",
   );
   process.exitCode = 2;
 }

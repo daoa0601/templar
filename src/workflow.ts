@@ -8,6 +8,7 @@ import type {
   TelecomIncidentWorkspace,
 } from "./workspace.js";
 import {
+  COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN,
   COURSE_SECURITY_EVALUATION_TEAM_PLAN,
   PCAP_SECURITY_TRIAGE_TEAM_PLAN,
   rolesForSecurityTeamPlan,
@@ -47,6 +48,20 @@ export const EXERCISE_SOLVE_WORKFLOW_LIMITS = {
   maxWallClockSeconds: 600,
   turnTimeoutSeconds: 180,
   maxTotalTokens: 300_000,
+} as const;
+
+export const COURSE_ASSIGNMENT_EVALUATION_WORKFLOW_LIMITS = {
+  maxRounds: 5,
+  maxConcurrentAgents: 2,
+  maxTotalAgents: 6,
+  maxTotalAgentTurns: 6,
+  // Provider-neutral headroom for six bounded worker turns plus five supervisor turns. OpenCode
+  // providers can spend materially longer reading the complete evidence mirror and returning
+  // schema-constrained turns than Codex while remaining inside agent, phase, token, and mutation
+  // boundaries equivalent to the larger course workflow.
+  maxWallClockSeconds: 3_600,
+  turnTimeoutSeconds: 600,
+  maxTotalTokens: 700_000,
 } as const;
 
 export const COURSE_SECURITY_EVALUATION_WORKFLOW_LIMITS = {
@@ -261,19 +276,87 @@ round, skip research, dispatch an undeclared agent, execute the artifact, or ask
   };
 }
 
-export function courseSecurityEvaluationWorkflow(
-  exercise: ExerciseSolveWorkspace,
-  options: { readonly model?: string } = {},
-): WorkflowDefinition {
-  const model = options.model?.trim();
+function workflowModel(value: string | undefined): string | undefined {
+  const model = value?.trim();
   if (
     model !== undefined &&
     (model.length === 0 ||
       model.length > 128 ||
       !/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,127}$/u.test(model))
   ) {
-    throw new Error("The course evaluation model identifier is invalid.");
+    throw new Error("The evaluation model identifier is invalid.");
   }
+  return model;
+}
+
+export function courseAssignmentEvaluationWorkflow(
+  exercise: ExerciseSolveWorkspace,
+  options: { readonly model?: string } = {},
+): WorkflowDefinition {
+  const model = workflowModel(options.model);
+  const coordinator = securityRoleAssignment(
+    COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN,
+    "course_assignment_evidence_map",
+  );
+  const red = securityRoleAssignment(
+    COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN,
+    "course_assignment_red_analysis",
+  );
+  const solverA = securityRoleAssignment(
+    COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN,
+    "course_assignment_solution_a",
+  );
+  const solverB = securityRoleAssignment(
+    COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN,
+    "course_assignment_solution_b",
+  );
+  const auditorA = securityRoleAssignment(
+    COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN,
+    "course_assignment_audit_a",
+  );
+  const auditorB = securityRoleAssignment(
+    COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN,
+    "course_assignment_audit_b",
+  );
+  return {
+    version: 1,
+    name: "course_assignment_evaluation",
+    objective:
+      "Solve one course assignment from attested passive evidence with red-team falsification, two independent blue-team solutions, and pinned assurance.",
+    configPath: `${exercise.root}/workflow.json`,
+    workspace: exercise.root,
+    allowDirtyWorkspace: false,
+    supervisor: {
+      model,
+      instructions: `Use this exact bounded sequence and no other sequence:
+Round 1: assign ${coordinator.block.agentId} to role ${coordinator.block.role.id}. It maps every question to immutable observations, upstream checks, reproducible calculations, and gaps without supplying final answers.
+Round 2: assign ${red.block.agentId} to role ${red.block.role.id}. Give it the coordinator report; it develops and falsifies attacker-oriented passive-analysis leads without executing content.
+Round 3: assign ${solverA.block.agentId} and ${solverB.block.agentId} together to role ${solverA.block.role.id}. Give each the coordinator and red-team reports. They remain independent, re-read the immutable evidence, answer every question, and each writes only result.json and report.md.
+Round 4: assign ${auditorA.block.agentId} to target ${auditorA.block.targetCandidateId} and ${auditorB.block.agentId} to target ${auditorB.block.targetCandidateId} using role ${auditorA.block.role.id}. Each auditor is pinned to its declared candidate and never selects.
+Round 5: accept the highest-scoring evaluator-passing candidate whose pinned audit passes. Break an exact score tie by candidate ordinal (${solverA.block.agentId} before ${solverB.block.agentId}). If neither qualifies, stop. Never execute specimen content, use network, inspect host paths, expose credentials, skip a phase, dispatch an undeclared member, change scope, or ask for more turns.`,
+    },
+    roles: rolesForSecurityTeamPlan(COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN).map((role) => ({
+      ...role,
+      model,
+    })),
+    limits: COURSE_ASSIGNMENT_EVALUATION_WORKFLOW_LIMITS,
+    evaluation: {
+      command: ["node", exercise.evaluatorPath],
+      timeoutSeconds: 20,
+    },
+    codex: {
+      binary: "codex",
+      ignoreUserConfig: true,
+      maxOutputBytes: 6 * 1024 * 1024,
+    },
+  };
+}
+
+export function courseSecurityEvaluationWorkflow(
+  exercise: ExerciseSolveWorkspace,
+  options: { readonly model?: string } = {},
+): WorkflowDefinition {
+  const model = workflowModel(options.model);
   const coordinator = securityRoleAssignment(
     COURSE_SECURITY_EVALUATION_TEAM_PLAN,
     "course_evidence_map",

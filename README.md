@@ -128,6 +128,9 @@ node dist/cli.js course inventory /path/to/course-material
 node dist/cli.js course compose /path/to/course-material /private/evidence.json /private/snapshot.json
 node dist/cli.js course solve /private/snapshot.json --runtime codex --model gpt-5.6-sol
 node dist/cli.js course solve /private/snapshot.json --runtime opencode --model zai-coding-plan/glm-5.2
+node dist/cli.js course lab snapshot lab_<32-hex-digits> /private/assignment-snapshot.json
+node dist/cli.js course lab solve lab_<32-hex-digits> --runtime codex --model gpt-5.6-sol
+node dist/cli.js course lab solve lab_<32-hex-digits> --runtime opencode --model zai-coding-plan/glm-5.2
 node dist/cli.js course grade /private/result.json /private/sealed-rubric.json
 
 # Run the compiled server.
@@ -152,12 +155,14 @@ Configuration:
 | `TEMPLAR_MAX_PCAP_BYTES`                       |               `8388608` | PCAP upload and analysis byte cap.                           |
 | `TEMPLAR_MAX_PCAP_PACKETS`                     |                 `50000` | Packet parsing cap.                                          |
 | `TEMPLAR_MAX_EXERCISE_SNAPSHOT_BYTES`          |                `524288` | Decoded exercise snapshot cap.                               |
+| `TEMPLAR_MAX_COURSE_LAB_SPECIMEN_BYTES`        |             `268435456` | Operator-only course-lab specimen cap.                       |
 | `TEMPLAR_MAX_SOURCE_SNAPSHOT_BYTES`            |               `8388608` | Canonical source snapshot cap.                               |
 | `TEMPLAR_DRONE_ENABLED`                        |                  `true` | Enables sandbox capability discovery through Drone.          |
 | `TEMPLAR_DRONE_URL`                            | `http://127.0.0.1:8090` | Drone service endpoint; plain HTTP is accepted only locally. |
 | `TEMPLAR_DRONE_TOKEN`                          |                   unset | Optional bearer token for Drone.                             |
 | `TEMPLAR_DRONE_TIMEOUT_MS`                     |                  `1000` | Bound for Drone control-plane requests.                      |
 | `TEMPLAR_DRONE_SOURCE_VALIDATION_OPERATION_ID` |                   unset | Registered operation used for accepted-fix replay.           |
+| `TEMPLAR_DRONE_COURSE_LAB_OPERATION_ID`        |                   unset | Registered attested course-analysis operation.               |
 | `TEMPLAR_COURSE_MATERIAL`                      |                   unset | Optional private course root for inventory/compose.          |
 | `TEMPLAR_COURSE_RUNTIME`                       |                 `codex` | Course CLI runtime: `codex` or `opencode`.                   |
 | `TEMPLAR_COURSE_MODEL`                         |         runtime default | Operator-selected course model; never caller-controlled.     |
@@ -369,6 +374,26 @@ settings.
 
 Drone's Apple-native provider runs Linux operations in one lightweight VM per job with no network
 interface, read-only OCI roots, bounded writable storage, and fixed-size ext4 artifact exchange.
+Drone reports a signed provider measurement and preserves a per-job execution statement. Templar
+records the exact provider attestation on accepted source replays and rejects a later job whose
+attestation or content-addressed inputs no longer match that immutable request.
+
+The whole-course workflow has a separate operator-only specimen seam. It is disabled until
+`TEMPLAR_DRONE_COURSE_LAB_OPERATION_ID` names one enabled no-network Apple operation with exactly two
+required inputs—`specimen` and generated `context`—and one required `evidence` output. Submission
+requires the operator to repeat the current signed provider-attestation ID and give a rationale.
+Templar writes that approval under `TEMPLAR_HOME/course-lab` before staging bytes, records only
+content identities rather than the specimen host path, correlates the returned job, and releases
+assignment evidence only after validating its content-addressed execution-attestation artifact.
+See [the course evaluation guide](docs/course-evaluation.md) for the commands and media types.
+
+Codex and OpenCode model inference remains in the trusted host control plane. The model credential is
+never copied into the specimen VM, and the fixed no-NIC VM cannot call OpenAI, Z.AI, or an AI gateway.
+The safe split is: preapproved tools analyze the specimen in the disposable VM; Templar validates and
+composes their passive evidence; then GPT-5.6 Sol or GLM-5.2 works only against that immutable
+snapshot. Putting an authenticated agent CLI inside this VM would require a different, explicitly
+egress-enabled provider profile and is not implied by the course-lab approval.
+
 Parallels can later be added inside Drone as a Windows-only provider without changing Templar's
 workflow boundary. Other dynamic workflows remain `requires_lab` until they gain the same
 declared-operation and approval integration.
@@ -381,7 +406,11 @@ one logical agent ID, one scoped-worktree role, and one phase. The workflow role
 supervisor sequence are derived from that plan rather than maintained as a second loose catalog.
 At runtime, a fail-closed guard requires the complete next phase with the exact declared agent IDs,
 roles, and pinned review targets; an invented member, skipped phase, or early acceptance stops the
-run and emits a durable guard event.
+run and emits a durable guard event. Templar appends the exact next-phase roster to every supervisor
+turn and prohibits supervisor tool use for scheduling, but still rejects rather than remaps a wrong
+identity. Assurance-block task text is bound by the control plane to one candidate's immutable
+files, evaluator evidence, diff, and trusted trace, so model-authored tasks cannot add unavailable
+cross-team reports as acceptance prerequisites.
 
 The source-security audit roster is:
 
@@ -403,6 +432,12 @@ reverse-engineering red-team specialists; managed and batch reverse-engineering 
 independent blue-team whole-corpus solvers; and two pinned assurance auditors. Its five phases cover
 all 33 requirements. See [the course evaluation guide](docs/course-evaluation.md) for commands,
 runtime authentication, private grading, and containment boundaries.
+
+The attested one-assignment roster uses one purple evidence coordinator, one passive red specialist,
+two blue solvers, and two pinned assurance auditors. Its workspace keeps canonical `exercise.json`
+plus a digest-indexed, line-bounded observation mirror: ordinary evidence is exact raw UTF-8, while
+only genuinely overlong lines fall back to reconstructable ordered JSONL chunks. This gives Codex
+and OpenCode the same evidence surface without putting a specimen or model credential in the VM.
 
 ## Evaluation and promotion
 

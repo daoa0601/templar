@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { SecurityTeamRuntime, securityTeamPhases } from "../src/security-team-guard.js";
 import {
+  COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN,
   COURSE_SECURITY_EVALUATION_TEAM_PLAN,
   PCAP_SECURITY_TRIAGE_TEAM_PLAN,
   SOURCE_SECURITY_AUDIT_TEAM_PLAN,
@@ -54,13 +55,15 @@ const ACCEPTING = result({
 
 class SequenceRuntime implements AgentRuntime {
   readonly #outputs: ReadonlyArray<RuntimeTurnResult>;
+  readonly inputs: Array<RuntimeTurnInput> = [];
   #index = 0;
 
   constructor(outputs: ReadonlyArray<RuntimeTurnResult>) {
     this.#outputs = outputs;
   }
 
-  readonly runTurn = (_input: RuntimeTurnInput) => {
+  readonly runTurn = (input: RuntimeTurnInput) => {
+    this.inputs.push(input);
     const output = this.#outputs[this.#index];
     this.#index += 1;
     return output === undefined ? Effect.die("Sequence runtime exhausted") : Effect.succeed(output);
@@ -89,36 +92,37 @@ function oneBlockPlan(block: SecurityRoleBlock): SecurityTeamPlan {
 
 describe("Templar security-team runtime guard", () => {
   it("dispatches complete phases to their declared member owners", async () => {
-    const runtime = new SecurityTeamRuntime(
-      new SequenceRuntime([
-        continuing([
-          {
-            agentId: "research_once",
-            roleId: "security_evidence_researcher",
-            task: "Prioritize packet facts.",
-            targetCandidateId: null,
-          },
-        ]),
-        continuing([
-          {
-            agentId: "candidate_b",
-            roleId: "security_analyst",
-            task: "Independently analyze the bounded evidence.",
-            targetCandidateId: null,
-          },
-          {
-            agentId: "candidate_a",
-            roleId: "security_analyst",
-            task: "Analyze the bounded evidence.",
-            targetCandidateId: null,
-          },
-        ]),
-        ACCEPTING,
+    const delegate = new SequenceRuntime([
+      continuing([
+        {
+          agentId: "research_once",
+          roleId: "security_evidence_researcher",
+          task: "Prioritize packet facts.",
+          targetCandidateId: null,
+        },
       ]),
-      PCAP_SECURITY_TRIAGE_TEAM_PLAN,
-    );
+      continuing([
+        {
+          agentId: "candidate_b",
+          roleId: "security_analyst",
+          task: "Independently analyze the bounded evidence.",
+          targetCandidateId: null,
+        },
+        {
+          agentId: "candidate_a",
+          roleId: "security_analyst",
+          task: "Analyze the bounded evidence.",
+          targetCandidateId: null,
+        },
+      ]),
+      ACCEPTING,
+    ]);
+    const runtime = new SecurityTeamRuntime(delegate, PCAP_SECURITY_TRIAGE_TEAM_PLAN);
 
     const first = await supervisorTurn(runtime);
+    expect(delegate.inputs[0]?.prompt).toContain(
+      'Phase 1 roster: [{"agentId":"research_once","roleId":"security_evidence_researcher","targetCandidateId":null}]',
+    );
     expect(first.events).toContainEqual({
       type: "templar.security_team_assignment",
       organizationId: "pcap_security_triage",
@@ -135,6 +139,9 @@ describe("Templar security-team runtime guard", () => {
       ],
     });
     expect(decision(await supervisorTurn(runtime)).status).toBe("continue");
+    expect(delegate.inputs[1]?.prompt).toContain(
+      'Phase 2 roster: [{"agentId":"candidate_a","roleId":"security_analyst","targetCandidateId":null},{"agentId":"candidate_b","roleId":"security_analyst","targetCandidateId":null}]',
+    );
     expect(decision(await supervisorTurn(runtime))).toMatchObject({
       status: "accept",
       selectedCandidateId: "candidate_a",
@@ -234,6 +241,56 @@ describe("Templar security-team runtime guard", () => {
     );
   });
 
+  it("binds pinned-review tasks to the block evidence boundary", async () => {
+    const reviewPlan = oneBlockPlan({
+      id: "pinned_review",
+      phase: 1,
+      agentId: "audit_a",
+      targetCandidateId: "candidate_a",
+      role: {
+        id: "evaluation_auditor",
+        kind: "review",
+        description: "Audit one pinned candidate.",
+        instructions: "Read only.",
+        maxInstances: 1,
+        maxTurns: 1,
+        model: undefined,
+      },
+    });
+    const runtime = new SecurityTeamRuntime(
+      new SequenceRuntime([
+        continuing([
+          {
+            agentId: "audit_a",
+            roleId: "evaluation_auditor",
+            task: "Require inaccessible coordinator and red-team reports before passing.",
+            targetCandidateId: "candidate_a",
+          },
+        ]),
+      ]),
+      reviewPlan,
+    );
+
+    const output = await supervisorTurn(runtime);
+    const bound = decision(output);
+    expect(bound.status).toBe("continue");
+    expect(bound.assignments[0]?.task).toContain("Audit only pinned candidate candidate_a");
+    expect(bound.assignments[0]?.task).toContain(
+      "Do not require or access coordinator, specialist, or other candidate reports",
+    );
+    expect(bound.assignments[0]?.task).not.toContain("before passing");
+    expect(output.events).toContainEqual({
+      type: "templar.security_team_task_bound",
+      organizationId: "guard_test",
+      phase: 1,
+      blockId: "pinned_review",
+      agentId: "audit_a",
+      roleId: "evaluation_auditor",
+      targetCandidateId: "candidate_a",
+      policy: "pinned_review_evidence_only",
+    });
+  });
+
   it("validates phase continuity, unique logical agents, review targets, and role capacity", () => {
     const baseRole = {
       id: "researcher",
@@ -298,6 +355,17 @@ describe("Templar security-team runtime guard", () => {
     expect(securityTeamPhases(SOURCE_SECURITY_AUDIT_TEAM_PLAN).map((phase) => phase.phase)).toEqual(
       [1, 2, 3, 4],
     );
+    expect(
+      securityTeamPhases(COURSE_ASSIGNMENT_EVALUATION_TEAM_PLAN).map((phase) => [
+        phase.phase,
+        phase.assignments.length,
+      ]),
+    ).toEqual([
+      [1, 1],
+      [2, 1],
+      [3, 2],
+      [4, 2],
+    ]);
     expect(
       securityTeamPhases(COURSE_SECURITY_EVALUATION_TEAM_PLAN).map((phase) => [
         phase.phase,

@@ -53,6 +53,14 @@ cannot rename a member, skip a phase, dispatch a new member, add turns, broaden 
 select a failing candidate. The course budget is nine worker turns, four concurrent workers, ten
 minutes per model turn, one hour wall clock, and 1.5 million charged tokens.
 
+Before every supervisor turn, Templar appends the exact next-phase identity roster. Supervisors do
+not need workspace tools to schedule a phase. The guard still rejects a mismatched roster rather
+than silently mapping a model-created alias onto a declared member. For assurance blocks, Templar
+also replaces the supervisor-authored task with a deterministic pinned-evidence task: an auditor may
+use only its candidate worktree, immutable evidence, evaluator contract/output, Git diff, and trusted
+trace. A supervisor cannot make acceptance depend on an unavailable coordinator, specialist, or
+other-candidate report.
+
 ### Codex with ChatGPT authentication
 
 ```bash
@@ -95,6 +103,130 @@ course tier is safe by construction only because agents receive hashed passive o
 than executable specimens. Any future direct debugging, sample execution, unpacking, or dynamic
 network behavior must be a separately registered and approved Drone operation in a disposable VM
 with its own network, resource, rollback, and audit controls.
+
+## Separately attested course lab
+
+Templar now has an operator-only path for producing one assignment's passive evidence in Drone. It
+does not put a model CLI or model credential in the guest. The Apple provider has no NIC, so Codex,
+OpenCode, OpenAI, Z.AI, Vercel AI Gateway, and other remote inference endpoints are intentionally
+unreachable there. The model/tool split is explicit:
+
+```text
+Codex auth or OpenCode auth on the trusted host
+  -> Templar and Agent Blocks orchestration
+       -> immutable assignment evidence only
+
+operator approval bound to one signed provider measurement
+  -> Drone registered operation
+       -> one disposable no-NIC Linux VM
+       -> fixed analyzer image and command
+       -> specimen + generated context in read-only input disk
+       -> assignment evidence + per-job execution statement
+```
+
+This preserves the requested model order—GPT-5.6 Sol through the local Codex/ChatGPT session first,
+then `zai-coding-plan/glm-5.2` through OpenCode—without copying either authentication store into an
+untrusted specimen environment. An agent-in-guest design would need a different signed provider
+profile with explicit egress and credential-broker policy; the no-network course approval does not
+silently authorize that wider boundary.
+
+The configured Drone operation must be enabled, use `apple_native`, declare `network: none`, and
+have exactly this exchange contract:
+
+- required `specimen` input accepting the operator-selected media type;
+- required `context` input with
+  `application/vnd.templar.course-lab-context+json`;
+- required `evidence` output with
+  `application/vnd.templar.course-assignment-evidence+json`;
+- no other input or output slots.
+
+The image digest, command, environment, user, resources, and output bounds remain in Drone's trusted
+operation registry. Templar and its agents cannot supply or override them.
+
+After Drone has been provisioned and its separately held Ed25519 reviewer has signed the exact
+driver, kernel, and initfs measurements, read the current ID from `drone doctor`. Repeat that ID in
+the submission so an expired or rotated statement cannot be accepted implicitly:
+
+```bash
+export TEMPLAR_DRONE_COURSE_LAB_OPERATION_ID=course.assignment.analyze
+
+node --enable-source-maps dist/cli.js course lab submit \
+  <manifest-source-artifact-id> \
+  /private/extracted-or-original-specimen \
+  application/zip \
+  --approve-attestation attestation.sha256.<64-hex-digest> \
+  --rationale "Analyze this exact assignment specimen in the reviewed no-network VM."
+
+node --enable-source-maps dist/cli.js course lab status lab_<32-hex-digits>
+
+node --enable-source-maps dist/cli.js course lab collect \
+  lab_<32-hex-digits> \
+  /private/assignment-evidence.json
+
+node --enable-source-maps dist/cli.js course lab snapshot \
+  lab_<32-hex-digits> \
+  /private/assignment-snapshot.json
+
+node --enable-source-maps dist/cli.js course lab solve \
+  lab_<32-hex-digits> \
+  --runtime codex \
+  --model gpt-5.6-sol
+
+node --enable-source-maps dist/cli.js course lab solve \
+  lab_<32-hex-digits> \
+  --runtime opencode \
+  --model zai-coding-plan/glm-5.2
+```
+
+Use the manifest artifact ID that proves the specimen's course scope. Templar records the actual
+specimen SHA-256 and size and notes whether it exactly equals that manifest artifact; an extracted
+child remains explicitly marked as derived. It never journals the source host path. Approval is
+written with mode `0600` before either content-addressed input is staged. Collection succeeds only
+for a correlated successful job with a valid per-job execution statement and a complete assignment
+evidence object whose questions, checks, observation namespace, and artifact provenance match the
+committed corpus manifest.
+
+Each collected file is a one-element assignment-evidence array. Once all five assignments have been
+collected, combine the arrays in a private location (for example, `jq -s 'add'`) and pass the result
+to `course compose`. Private custody also remains under
+`TEMPLAR_HOME/course-lab/<lab-id>`: approval, submission, normalized evidence, the execution
+statement, and a collection receipt. None of those files belongs in Git.
+
+`snapshot` revalidates the collected evidence, provider/execution statement, and committed manifest
+before producing the model-safe assignment snapshot. Every incident workspace retains
+`exercise.json` as the canonical object and adds `observations/index.json`. Normal observations are
+materialized as exact raw UTF-8 files whose natural lines are bounded for model CLI readers. Only a
+genuinely overlong source line uses ordered JSONL code-point chunks; concatenating `text` fields by
+`chunk_index` reconstructs the canonical value. The index records the encoding, size, maximum line,
+and SHA-256 digest, so runtime display limits cannot silently hide the end of a disassembly string.
+
+The one-assignment organization is five phases and six worker turns: one purple evidence
+coordinator, one passive red specialist, two independent blue solvers, two pinned assurance
+auditors, then deterministic selection. It permits two concurrent workers, ten minutes per model
+turn, one hour wall clock, and 700,000 charged tokens. These larger time limits accommodate both the
+Codex and OpenCode adapters without changing the six-member roster, phase count, concurrency, token
+cap, evaluator, mutation allowlist, or sandbox.
+
+### Recorded local smoke validation
+
+The following 2026-07-18 runs validate the integration; they are one-machine smoke results, not a
+model benchmark or course grade. Private journals retain the raw events and outputs.
+
+| Boundary                               | Result                 | Elapsed | Charged tokens | Selection gates                                                  |
+| -------------------------------------- | ---------------------- | ------: | -------------: | ---------------------------------------------------------------- |
+| Apple lightweight VM evidence job      | succeeded              |  1.57 s |            n/a | no NIC, fixed operation, signed measurement, execution statement |
+| GPT-5.6 Sol through Codex/ChatGPT auth | accepted `candidate_a` |  8m 16s |        509,100 | evaluator 100, complete trace, audit pass                        |
+| GLM-5.2 through Z.AI/OpenCode auth     | accepted `candidate_a` | 20m 35s |        111,945 | evaluator 100, complete trace, audit pass                        |
+
+The local VM row used an operator smoke-signing key kept outside Drone state. It validates the
+measurement/admission/execution chain but does not demonstrate organizational reviewer
+independence; a production attestation still requires a genuinely separate reviewer and key owner.
+
+Intermediate fail-closed trials were also retained: an undeclared GLM member alias was rejected,
+the initial 15-minute global allowance expired before audits, and an overly fragmented evidence
+mirror caused 300-second worker timeouts. Those failures led to the exact-roster prompt binding,
+provider-neutral time bounds, and raw-text-first evidence mirror above. No failed trial applied a
+candidate.
 
 ## Deterministic demo and sealed grading
 

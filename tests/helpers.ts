@@ -23,6 +23,7 @@ export async function testConfig(overrides: Partial<TemplarConfig> = {}): Promis
     maxPcapBytes: 1024 * 1024,
     maxPcapPackets: 100,
     maxExerciseSnapshotBytes: 256 * 1024,
+    maxCourseLabSpecimenBytes: 1024 * 1024,
     maxSourceSnapshotBytes: 1024 * 1024,
     droneEnabled: false,
     droneUrl: "http://127.0.0.1:8090",
