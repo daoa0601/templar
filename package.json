@@ -1,6 +1,6 @@
 {
   "name": "templar",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Policy-gated network and security analysis built on Agent Blocks",
@@ -25,11 +25,13 @@
     "domain/v1",
     "README.md",
     "QUALITY.md",
-    "scripts/quality/require-pnpm.mjs"
+    "scripts/quality/require-pnpm.mjs",
+    "tools"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm quality:quick && pnpm test",
+    "course:inventory": "pnpm build && node --enable-source-maps dist/cli.js course inventory",
     "deps:audit": "pnpm audit --prod --audit-level high",
     "deps:check": "pnpm deps:audit && pnpm deps:signatures",
     "deps:signatures": "pnpm audit signatures",

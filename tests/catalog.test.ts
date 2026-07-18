@@ -53,6 +53,14 @@ describe("Templar workflow capability gates", () => {
       networkMode: "denied",
       traceAuditorRequired: false,
     });
+    expect(workflowEntry("course_security_evaluation")).toMatchObject({
+      agentOrganizationId: "course_security_evaluation",
+      releaseState: "enabled",
+      family: "reverse_engineering",
+      requiredCapability: "RE_STATIC",
+      networkMode: "denied",
+      traceAuditorRequired: true,
+    });
     expect(workflowEntry("source_security_audit")).toMatchObject({
       agentOrganizationId: "source_security_audit",
       releaseState: "enabled",
@@ -75,6 +83,7 @@ describe("Templar workflow capability gates", () => {
       "telecom_incident",
       "pcap_security_triage",
       "exercise_solve",
+      "course_security_evaluation",
       "source_security_audit",
       "source_security_fix",
     ]);

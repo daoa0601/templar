@@ -84,6 +84,7 @@ exactKeys(
     "summary",
     "answers",
     "unanswered_question_ids",
+    "evidence_checks_relied_on",
     "checks_performed",
     "external_mutations",
   ],
@@ -99,6 +100,12 @@ const knownQuestions = new Set(context.known_question_ids ?? []);
 const requiredQuestions = new Set(context.required_question_ids ?? []);
 const knownObservations = new Set(context.known_observation_ids ?? []);
 const requiredObservations = new Set(context.required_observation_ids ?? []);
+const questionObservationNamespaces = new Map(
+  (Array.isArray(context.question_observation_namespaces)
+    ? context.question_observation_namespaces
+    : []
+  ).map((entry) => [entry.question_id, entry.observation_prefix]),
+);
 const answered = new Set();
 const cited = new Set();
 
@@ -124,6 +131,10 @@ for (const [index, raw] of (Array.isArray(result.answers) ? result.answers : [])
     1,
   )) {
     if (!knownObservations.has(observationId)) fail("unknown_observation", observationId);
+    const namespace = questionObservationNamespaces.get(questionId);
+    if (typeof namespace === "string" && !observationId.startsWith(namespace)) {
+      fail("cross_assignment_observation", `${questionId}:${observationId}`);
+    }
     cited.add(observationId);
   }
 }
@@ -140,10 +151,17 @@ if (unanswered.size > 0 || result.status !== "completed") {
   fail("incomplete_result", "A passing exercise attempt must answer every required question");
 }
 
-const availableChecks = new Set(context.available_checks ?? []);
+const availableEvidenceChecks = new Set(context.available_evidence_checks ?? []);
+const reliedOnEvidenceChecks = new Set(
+  strings(result.evidence_checks_relied_on, "evidence_checks_relied_on", 1),
+);
+for (const check of reliedOnEvidenceChecks) {
+  if (!availableEvidenceChecks.has(check)) fail("unavailable_evidence_check_claim", check);
+}
+const availableCandidateChecks = new Set(context.candidate_checks_available ?? []);
 const performedChecks = new Set(strings(result.checks_performed, "checks_performed", 1));
 for (const check of performedChecks) {
-  if (!availableChecks.has(check)) fail("unavailable_check_claim", check);
+  if (!availableCandidateChecks.has(check)) fail("unavailable_candidate_check_claim", check);
 }
 if (!Array.isArray(result.external_mutations) || result.external_mutations.length !== 0) {
   fail("forbidden_external_mutation", "external_mutations must be empty");
@@ -169,10 +187,16 @@ try {
 
 const questionCoverage = ratio(answered, requiredQuestions);
 const observationCoverage = ratio(cited, requiredObservations);
-const checkCoverage = ratio(performedChecks, availableChecks);
+const evidenceCheckCoverage = ratio(reliedOnEvidenceChecks, availableEvidenceChecks);
+const candidateCheckCoverage = ratio(performedChecks, availableCandidateChecks);
 const score =
-  Math.round((60 * questionCoverage + 30 * observationCoverage + 10 * checkCoverage) * 1_000_000) /
-  1_000_000;
+  Math.round(
+    (60 * questionCoverage +
+      30 * observationCoverage +
+      5 * evidenceCheckCoverage +
+      5 * candidateCheckCoverage) *
+      1_000_000,
+  ) / 1_000_000;
 const hardGateFailures = [
   ...new Map(failures.map((failure) => [`${failure.code}|${failure.detail}`, failure])).values(),
 ].sort(
@@ -180,13 +204,14 @@ const hardGateFailures = [
 );
 const evaluation = {
   schema_version: "1",
-  evaluator_version: "exercise-evaluator-v1",
+  evaluator_version: "exercise-evaluator-v2",
   passed: hardGateFailures.length === 0,
   hard_gate_failures: hardGateFailures,
   coverage: {
     questions: questionCoverage,
     observations: observationCoverage,
-    checks: checkCoverage,
+    evidence_checks: evidenceCheckCoverage,
+    candidate_checks: candidateCheckCoverage,
   },
   score,
 };

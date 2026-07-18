@@ -212,10 +212,12 @@ function guardedSupervisorResult(
 export class DeterministicSelectionRuntime implements AgentRuntime {
   readonly #delegate: AgentRuntime;
   readonly #options: DeterministicSelectionOptions;
+  readonly metadata?: NonNullable<AgentRuntime["metadata"]>;
 
   constructor(delegate: AgentRuntime, options: DeterministicSelectionOptions = {}) {
     this.#delegate = delegate;
     this.#options = options;
+    if (delegate.metadata !== undefined) this.metadata = delegate.metadata;
   }
 
   readonly runTurn = (input: RuntimeTurnInput) =>

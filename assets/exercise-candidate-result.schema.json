@@ -10,6 +10,7 @@
     "summary",
     "answers",
     "unanswered_question_ids",
+    "evidence_checks_relied_on",
     "checks_performed",
     "external_mutations"
   ],
@@ -39,6 +40,12 @@
     },
     "unanswered_question_ids": {
       "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "evidence_checks_relied_on": {
+      "type": "array",
+      "minItems": 1,
       "uniqueItems": true,
       "items": { "type": "string" }
     },

@@ -34,7 +34,8 @@ async function writeCandidate(root: string, mutate?: (value: Record<string, unkn
       },
     ],
     unanswered_question_ids: [],
-    checks_performed: ["pe_headers", "targeted_disassembly"],
+    evidence_checks_relied_on: ["pe_headers", "targeted_disassembly"],
+    checks_performed: ["deterministic_evaluator"],
     external_mutations: [],
   };
   mutate?.(output);
@@ -127,7 +128,8 @@ describe("bounded exercise snapshots", () => {
     expect(await evaluate(workspace.root)).toMatchObject({
       passed: true,
       score: 100,
-      evaluator_version: "exercise-evaluator-v1",
+      evaluator_version: "exercise-evaluator-v2",
+      coverage: { evidence_checks: 1, candidate_checks: 1 },
     });
   });
 

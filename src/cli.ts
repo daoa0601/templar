@@ -1,6 +1,15 @@
 #!/usr/bin/env node
+import { constants } from "node:fs";
+import { open, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+import { makeOpenCodeRuntime } from "@agentic-orch/agent-blocks/templates/scoped-worktree/adapters/opencode-cli";
+
 import { loadConfig } from "./config.js";
-import { decodeIncidentInput } from "./contracts.js";
+import { decodeExerciseSolveInput, decodeIncidentInput } from "./contracts.js";
+import { buildCourseExerciseSnapshot } from "./course-evidence.js";
+import { gradeCourseCandidate } from "./course-grade.js";
+import { inventoryCourseCorpus, loadCourseCorpusManifest } from "./course-corpus.js";
 import { ScriptedTemplarRuntime } from "./fake-runtime.js";
 import { startHttpServer } from "./http.js";
 import { TemplarService } from "./service.js";
@@ -39,8 +48,129 @@ async function wait(service: TemplarService, runId: string): Promise<void> {
   }
 }
 
+async function boundedJson(
+  filePathInput: string,
+  maximumBytes = 16 * 1024 * 1024,
+): Promise<unknown> {
+  const filePath = path.resolve(filePathInput);
+  const handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.size <= 0 || before.size > maximumBytes) {
+      throw new Error(`JSON input must be a 1-${maximumBytes} byte regular file.`);
+    }
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    if (
+      after.size !== before.size ||
+      after.ino !== before.ino ||
+      after.dev !== before.dev ||
+      bytes.length !== before.size
+    ) {
+      throw new Error("JSON input changed while it was being read.");
+    }
+    return JSON.parse(bytes.toString("utf8")) as unknown;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function emitJson(value: unknown, destination?: string): Promise<void> {
+  const serialized = `${JSON.stringify(value, null, 2)}\n`;
+  if (destination === undefined) {
+    process.stdout.write(serialized);
+    return;
+  }
+  await writeFile(path.resolve(destination), serialized, {
+    encoding: "utf8",
+    mode: 0o600,
+    flag: "wx",
+  });
+}
+
+type CourseRuntime = "codex" | "opencode";
+
+function courseRunOptions(args: ReadonlyArray<string>): {
+  readonly runtime: CourseRuntime;
+  readonly model: string | undefined;
+} {
+  if (args.length % 2 !== 0) {
+    throw new Error(
+      "Usage: templar course [solve|demo] <snapshot.json> [--runtime codex|opencode] [--model <model>]",
+    );
+  }
+  const options = new Map<string, string>();
+  for (let index = 0; index < args.length; index += 2) {
+    const key = args[index];
+    const value = args[index + 1];
+    if (
+      key === undefined ||
+      value === undefined ||
+      !["--runtime", "--model"].includes(key) ||
+      options.has(key)
+    ) {
+      throw new Error(
+        "Usage: templar course [solve|demo] <snapshot.json> [--runtime codex|opencode] [--model <model>]",
+      );
+    }
+    options.set(key, value);
+  }
+  const runtime = options.get("--runtime") ?? process.env.TEMPLAR_COURSE_RUNTIME ?? "codex";
+  if (runtime !== "codex" && runtime !== "opencode") {
+    throw new Error("The course runtime must be codex or opencode.");
+  }
+  const configuredModel = options.get("--model") ?? process.env.TEMPLAR_COURSE_MODEL;
+  return {
+    runtime,
+    model: configuredModel ?? (runtime === "opencode" ? "zai-coding-plan/glm-5.2" : undefined),
+  };
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2] ?? "serve";
+  if (command === "course" && process.argv[3] === "inventory") {
+    const courseRoot = process.argv[4] ?? process.env.TEMPLAR_COURSE_MATERIAL;
+    if (courseRoot === undefined) {
+      throw new Error("Usage: templar course inventory <course-material-root>");
+    }
+    const inventory = await inventoryCourseCorpus(courseRoot);
+    process.stdout.write(`${JSON.stringify(inventory, null, 2)}\n`);
+    if (!inventory.complete) process.exitCode = 1;
+    return;
+  }
+  if (command === "course" && process.argv[3] === "compose") {
+    const courseRoot = process.argv[4] ?? process.env.TEMPLAR_COURSE_MATERIAL;
+    const evidencePath = process.argv[5];
+    if (courseRoot === undefined || evidencePath === undefined) {
+      throw new Error(
+        "Usage: templar course compose <course-material-root> <assignment-evidence.json> [snapshot.json]",
+      );
+    }
+    const manifest = await loadCourseCorpusManifest();
+    const inventory = await inventoryCourseCorpus(courseRoot, manifest);
+    const snapshot = buildCourseExerciseSnapshot({
+      manifest,
+      inventory,
+      assignments: await boundedJson(evidencePath),
+    });
+    await emitJson(snapshot, process.argv[6]);
+    return;
+  }
+  if (command === "course" && process.argv[3] === "grade") {
+    const candidatePath = process.argv[4];
+    const rubricPath = process.argv[5];
+    if (candidatePath === undefined || rubricPath === undefined) {
+      throw new Error("Usage: templar course grade <result.json> <sealed-rubric.json>");
+    }
+    const grade = gradeCourseCandidate({
+      candidate: await boundedJson(candidatePath),
+      rubric: await boundedJson(rubricPath),
+      manifest: await loadCourseCorpusManifest(),
+    });
+    await emitJson(grade);
+    if (!grade.passed) process.exitCode = 1;
+    return;
+  }
   const config = loadConfig();
   if (command === "serve") {
     const service = new TemplarService(config);
@@ -66,7 +196,47 @@ async function main(): Promise<void> {
     await wait(service, submitted.run_id);
     return;
   }
-  process.stderr.write("Usage: templar [serve|sample|demo]\n");
+  if (command === "course" && (process.argv[3] === "solve" || process.argv[3] === "demo")) {
+    const snapshotPath = process.argv[4];
+    if (snapshotPath === undefined) {
+      throw new Error(
+        "Usage: templar course [solve|demo] <snapshot.json> [--runtime codex|opencode] [--model <model>]",
+      );
+    }
+    const options = courseRunOptions(process.argv.slice(5));
+    const fake = process.argv[3] === "demo";
+    const openCodeRuntime =
+      !fake && options.runtime === "opencode"
+        ? makeOpenCodeRuntime({
+            binary: process.env.TEMPLAR_OPENCODE_BINARY?.trim() || "opencode",
+            maxOutputBytes: 12 * 1024 * 1024,
+          })
+        : undefined;
+    const service = new TemplarService(config, {
+      ...(fake
+        ? { runtimeFactory: () => new ScriptedTemplarRuntime() }
+        : openCodeRuntime === undefined
+          ? {}
+          : { runtimeFactory: () => openCodeRuntime }),
+      ...(options.model === undefined ? {} : { courseModel: options.model }),
+    });
+    await service.initialize();
+    const artifact = await service.stageExerciseSnapshot(await boundedJson(snapshotPath));
+    const submitted = await service.submitExerciseSolve(
+      decodeExerciseSolveInput({
+        schema_version: "1",
+        exercise_snapshot_id: artifact.artifact_id,
+      }),
+    );
+    process.stdout.write(
+      `${fake ? "Deterministic fake" : options.runtime === "opencode" ? "OpenCode-backed" : "Codex-backed"} course run ${submitted.run_id} started.\n`,
+    );
+    await wait(service, submitted.run_id);
+    return;
+  }
+  process.stderr.write(
+    "Usage: templar [serve|sample|demo|course inventory <root>|course compose <root> <evidence.json> [snapshot.json]|course solve <snapshot.json> [--runtime codex|opencode] [--model <model>]|course demo <snapshot.json> [--runtime codex|opencode] [--model <model>]|course grade <result.json> <sealed-rubric.json>]\n",
+  );
   process.exitCode = 2;
 }
 

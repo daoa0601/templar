@@ -52,7 +52,12 @@ interface FakeExerciseContext {
   readonly required_question_ids: ReadonlyArray<string>;
   readonly required_observation_ids: ReadonlyArray<string>;
   readonly known_observation_ids: ReadonlyArray<string>;
-  readonly available_checks: ReadonlyArray<string>;
+  readonly available_evidence_checks: ReadonlyArray<string>;
+  readonly candidate_checks_available: ReadonlyArray<string>;
+  readonly question_observation_namespaces?: ReadonlyArray<{
+    readonly question_id: string;
+    readonly observation_prefix: string;
+  }>;
 }
 
 interface FakeSourceSurface {
@@ -259,6 +264,12 @@ async function writeExerciseCandidate(
       ? context.required_observation_ids
       : context.known_observation_ids;
   const limitedObservations = context.known_observation_ids.slice(0, 1);
+  const namespaces = new Map(
+    (context.question_observation_namespaces ?? []).map((entry) => [
+      entry.question_id,
+      entry.observation_prefix,
+    ]),
+  );
   const output = {
     schema_version: "1",
     status: "completed",
@@ -266,14 +277,35 @@ async function writeExerciseCandidate(
     answers: context.required_question_ids.map((questionId, index) => ({
       question_id: questionId,
       answer: `The scripted runtime produced a structurally grounded answer for ${questionId}.`,
-      observation_ids: completeCoverage
-        ? [completeObservations[index % completeObservations.length]!]
-        : limitedObservations,
+      observation_ids: (() => {
+        const namespace = namespaces.get(questionId);
+        if (namespace !== undefined) {
+          const scoped = completeObservations.filter((observationId) =>
+            observationId.startsWith(namespace),
+          );
+          const scopedQuestions = context.required_question_ids.filter(
+            (candidateQuestionId) => namespaces.get(candidateQuestionId) === namespace,
+          );
+          const scopedQuestionIndex = scopedQuestions.indexOf(questionId);
+          if (scoped.length === 0 || scopedQuestionIndex < 0 || scopedQuestions.length === 0) {
+            throw new Error(`The scripted runtime has no scoped observation for ${questionId}.`);
+          }
+          const assigned = scoped.filter(
+            (_, observationIndex) =>
+              observationIndex % scopedQuestions.length === scopedQuestionIndex,
+          );
+          return assigned.length > 0 ? assigned : [scoped[scopedQuestionIndex % scoped.length]!];
+        }
+        return completeCoverage
+          ? [completeObservations[index % completeObservations.length]!]
+          : limitedObservations;
+      })(),
       uncertainty:
         "Semantic correctness is outside the scripted runtime; use the course smoke grade.",
     })),
     unanswered_question_ids: [],
-    checks_performed: context.available_checks,
+    evidence_checks_relied_on: context.available_evidence_checks,
+    checks_performed: context.candidate_checks_available,
     external_mutations: [],
   };
   await writeFile(
@@ -618,6 +650,14 @@ async function auditCandidate(input: RuntimeTurnInput): Promise<string> {
 export class ScriptedTemplarRuntime implements AgentRuntime {
   #supervisorTurns = 0;
 
+  readonly metadata = {
+    adapter: "templar-scripted",
+    binary: null,
+    ignoreUserConfig: true,
+    maxOutputBytes: null,
+    toolPolicy: "scripted-no-model",
+  } as const;
+
   readonly runTurn = (input: RuntimeTurnInput) =>
     Effect.tryPromise({
       try: async () => {
@@ -625,14 +665,16 @@ export class ScriptedTemplarRuntime implements AgentRuntime {
         if (input.agentId !== "supervisor") {
           if (input.agentId === "candidate_a") {
             if (workflow === "pcap_security_triage") await writeSecurityCandidate(input, true);
-            else if (workflow === "exercise_solve") await writeExerciseCandidate(input, true);
+            else if (workflow === "exercise_solve" || workflow === "course_security_evaluation")
+              await writeExerciseCandidate(input, true);
             else if (workflow === "source_security_audit") await writeSourceCandidate(input, true);
             else if (workflow === "source_security_fix") await writeSourceFixCandidate(input, true);
             else await writeCandidate(input, true);
           }
           if (input.agentId === "candidate_b") {
             if (workflow === "pcap_security_triage") await writeSecurityCandidate(input, false);
-            else if (workflow === "exercise_solve") await writeExerciseCandidate(input, false);
+            else if (workflow === "exercise_solve" || workflow === "course_security_evaluation")
+              await writeExerciseCandidate(input, false);
             else if (workflow === "source_security_audit") await writeSourceCandidate(input, false);
             else if (workflow === "source_security_fix")
               await writeSourceFixCandidate(input, false);
@@ -645,6 +687,119 @@ export class ScriptedTemplarRuntime implements AgentRuntime {
         }
 
         this.#supervisorTurns += 1;
+        if (workflow === "course_security_evaluation") {
+          if (this.#supervisorTurns === 1) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Map the complete course corpus, evidence namespaces, and gaps.",
+                assignments: [
+                  {
+                    agentId: "course_recon_once",
+                    roleId: "course_evidence_coordinator",
+                    task: "Map every requirement to bounded observations and explicit gaps.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 2) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Dispatch the four assignment-scoped passive specialist blocks.",
+                assignments: [
+                  {
+                    agentId: "windows_intrusion_once",
+                    roleId: "course_windows_intrusion_specialist",
+                    task: "Correlate the Windows forensic facts and timeline without overclaiming.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "native_re_once",
+                    roleId: "course_native_re_specialist",
+                    task: "Recover native static and anti-analysis semantics passively.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "managed_re_once",
+                    roleId: "course_managed_re_specialist",
+                    task: "Reproduce managed packing, metadata, resources, and crypto.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "batch_re_once",
+                    roleId: "course_batch_re_specialist",
+                    task: "Review bounded all-sample automation and completeness.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 3) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Create two independent whole-corpus solutions.",
+                assignments: [
+                  {
+                    agentId: "candidate_a",
+                    roleId: "course_whole_corpus_solver",
+                    task: "Solve all requirements and falsify specialist leads from the evidence.",
+                    targetCandidateId: null,
+                  },
+                  {
+                    agentId: "candidate_b",
+                    roleId: "course_whole_corpus_solver",
+                    task: "Independently solve all requirements and preserve uncertainty.",
+                    targetCandidateId: null,
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          if (this.#supervisorTurns === 4) {
+            return result(
+              "supervisor-thread",
+              JSON.stringify({
+                status: "continue",
+                summary: "Audit both pinned whole-corpus candidates.",
+                assignments: [
+                  {
+                    agentId: "audit_a",
+                    roleId: "evaluation_auditor",
+                    task: "Audit candidate_a evidence alignment, evaluator output, diff, and trace.",
+                    targetCandidateId: "candidate_a",
+                  },
+                  {
+                    agentId: "audit_b",
+                    roleId: "evaluation_auditor",
+                    task: "Audit candidate_b evidence alignment, evaluator output, diff, and trace.",
+                    targetCandidateId: "candidate_b",
+                  },
+                ],
+                selectedCandidateId: null,
+              }),
+            );
+          }
+          return result(
+            "supervisor-thread",
+            JSON.stringify({
+              status: "accept",
+              summary: "Accept the highest-scoring evaluator-passing, assurance-cleared solution.",
+              assignments: [],
+              selectedCandidateId: "candidate_a",
+            }),
+          );
+        }
         if (workflow === "source_security_fix") {
           if (this.#supervisorTurns === 1) {
             return result(

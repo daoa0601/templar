@@ -2,10 +2,11 @@ import { Schema, SchemaParser } from "effect";
 
 import { invalidInput } from "./errors.js";
 
-export const MAX_EXERCISE_QUESTIONS = 32;
-export const MAX_EXERCISE_OBSERVATIONS = 24;
+export const MAX_EXERCISE_QUESTIONS = 64;
+export const MAX_EXERCISE_OBSERVATIONS = 128;
 export const MAX_EXERCISE_PROMPT_TEXT = 4_000;
 export const MAX_EXERCISE_OBSERVATION_TEXT = 100_000;
+export const EXERCISE_CANDIDATE_CHECKS = ["deterministic_evaluator"] as const;
 
 const ExerciseQuestionSchema = Schema.Struct({
   question_id: Schema.String,
@@ -26,7 +27,10 @@ const ExerciseSnapshotSchema = Schema.Struct({
   artifact: Schema.Struct({
     digest: Schema.String,
     size: Schema.Number,
-    media_type: Schema.Literal("application/vnd.microsoft.portable-executable"),
+    media_type: Schema.Literals([
+      "application/vnd.microsoft.portable-executable",
+      "application/vnd.templar.course-corpus+json",
+    ]),
   }),
   analyzer: Schema.Struct({
     analyzer_id: Schema.String,
@@ -64,7 +68,9 @@ export interface ExerciseSnapshot {
   readonly artifact: {
     readonly digest: string;
     readonly size: number;
-    readonly media_type: "application/vnd.microsoft.portable-executable";
+    readonly media_type:
+      | "application/vnd.microsoft.portable-executable"
+      | "application/vnd.templar.course-corpus+json";
   };
   readonly analyzer: {
     readonly analyzer_id: string;
@@ -81,7 +87,12 @@ export interface ExerciseEvaluationContext {
   readonly required_question_ids: ReadonlyArray<string>;
   readonly known_observation_ids: ReadonlyArray<string>;
   readonly required_observation_ids: ReadonlyArray<string>;
-  readonly available_checks: ReadonlyArray<string>;
+  readonly available_evidence_checks: ReadonlyArray<string>;
+  readonly candidate_checks_available: ReadonlyArray<string>;
+  readonly question_observation_namespaces: ReadonlyArray<{
+    readonly question_id: string;
+    readonly observation_prefix: string;
+  }>;
 }
 
 function text(value: string, label: string, maximum: number): string {
@@ -156,7 +167,7 @@ export function decodeExerciseSnapshot(value: unknown): ExerciseSnapshot {
     artifact: {
       digest: input.artifact.digest,
       size: input.artifact.size,
-      media_type: "application/vnd.microsoft.portable-executable",
+      media_type: input.artifact.media_type,
     },
     analyzer: {
       analyzer_id: id(input.analyzer.analyzer_id, "analyzer.analyzer_id"),
@@ -177,6 +188,14 @@ export function exerciseEvaluationContext(snapshot: ExerciseSnapshot): ExerciseE
     required_observation_ids: snapshot.observations
       .filter((observation) => observation.required)
       .map((observation) => observation.observation_id),
-    available_checks: snapshot.available_checks,
+    available_evidence_checks: snapshot.available_checks,
+    candidate_checks_available: EXERCISE_CANDIDATE_CHECKS,
+    question_observation_namespaces:
+      snapshot.artifact.media_type === "application/vnd.templar.course-corpus+json"
+        ? snapshot.questions.map((question) => ({
+            question_id: question.question_id,
+            observation_prefix: `${question.question_id.slice(0, question.question_id.lastIndexOf("."))}.observation.`,
+          }))
+        : [],
   };
 }

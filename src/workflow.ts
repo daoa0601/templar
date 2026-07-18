@@ -8,6 +8,7 @@ import type {
   TelecomIncidentWorkspace,
 } from "./workspace.js";
 import {
+  COURSE_SECURITY_EVALUATION_TEAM_PLAN,
   PCAP_SECURITY_TRIAGE_TEAM_PLAN,
   rolesForSecurityTeamPlan,
   securityRoleAssignment,
@@ -46,6 +47,16 @@ export const EXERCISE_SOLVE_WORKFLOW_LIMITS = {
   maxWallClockSeconds: 600,
   turnTimeoutSeconds: 180,
   maxTotalTokens: 300_000,
+} as const;
+
+export const COURSE_SECURITY_EVALUATION_WORKFLOW_LIMITS = {
+  maxRounds: 5,
+  maxConcurrentAgents: 4,
+  maxTotalAgents: 9,
+  maxTotalAgentTurns: 9,
+  maxWallClockSeconds: 3_600,
+  turnTimeoutSeconds: 600,
+  maxTotalTokens: 1_500_000,
 } as const;
 
 export const SOURCE_SECURITY_AUDIT_WORKFLOW_LIMITS = {
@@ -246,6 +257,102 @@ round, skip research, dispatch an undeclared agent, execute the artifact, or ask
       binary: "codex",
       ignoreUserConfig: true,
       maxOutputBytes: 2 * 1024 * 1024,
+    },
+  };
+}
+
+export function courseSecurityEvaluationWorkflow(
+  exercise: ExerciseSolveWorkspace,
+  options: { readonly model?: string } = {},
+): WorkflowDefinition {
+  const model = options.model?.trim();
+  if (
+    model !== undefined &&
+    (model.length === 0 ||
+      model.length > 128 ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,127}$/u.test(model))
+  ) {
+    throw new Error("The course evaluation model identifier is invalid.");
+  }
+  const coordinator = securityRoleAssignment(
+    COURSE_SECURITY_EVALUATION_TEAM_PLAN,
+    "course_evidence_map",
+  );
+  const windows = securityRoleAssignment(
+    COURSE_SECURITY_EVALUATION_TEAM_PLAN,
+    "course_windows_intrusion_analysis",
+  );
+  const native = securityRoleAssignment(
+    COURSE_SECURITY_EVALUATION_TEAM_PLAN,
+    "course_native_re_analysis",
+  );
+  const managed = securityRoleAssignment(
+    COURSE_SECURITY_EVALUATION_TEAM_PLAN,
+    "course_managed_re_analysis",
+  );
+  const batch = securityRoleAssignment(
+    COURSE_SECURITY_EVALUATION_TEAM_PLAN,
+    "course_batch_re_analysis",
+  );
+  const solverA = securityRoleAssignment(COURSE_SECURITY_EVALUATION_TEAM_PLAN, "course_solution_a");
+  const solverB = securityRoleAssignment(COURSE_SECURITY_EVALUATION_TEAM_PLAN, "course_solution_b");
+  const auditorA = securityRoleAssignment(
+    COURSE_SECURITY_EVALUATION_TEAM_PLAN,
+    "course_evaluation_audit_a",
+  );
+  const auditorB = securityRoleAssignment(
+    COURSE_SECURITY_EVALUATION_TEAM_PLAN,
+    "course_evaluation_audit_b",
+  );
+  return {
+    version: 1,
+    name: "course_security_evaluation",
+    objective:
+      "Solve every requirement in the versioned security course corpus from passive, content-identified evidence with independent falsification and assurance.",
+    configPath: `${exercise.root}/workflow.json`,
+    workspace: exercise.root,
+    allowDirtyWorkspace: false,
+    supervisor: {
+      model,
+      instructions: `Use this exact bounded sequence and no other sequence:
+The identity tuples below are literal control-plane values. Copy agentId, roleId, and
+targetCandidateId exactly; an agentId is not a roleId and must never be derived or renamed:
+Round 1 identities: [{"agentId":"${coordinator.block.agentId}","roleId":"${coordinator.block.role.id}","targetCandidateId":null}]
+Round 2 identities: [{"agentId":"${windows.block.agentId}","roleId":"${windows.block.role.id}","targetCandidateId":null},{"agentId":"${native.block.agentId}","roleId":"${native.block.role.id}","targetCandidateId":null},{"agentId":"${managed.block.agentId}","roleId":"${managed.block.role.id}","targetCandidateId":null},{"agentId":"${batch.block.agentId}","roleId":"${batch.block.role.id}","targetCandidateId":null}]
+Round 3 identities: [{"agentId":"${solverA.block.agentId}","roleId":"${solverA.block.role.id}","targetCandidateId":null},{"agentId":"${solverB.block.agentId}","roleId":"${solverB.block.role.id}","targetCandidateId":null}]
+Round 4 identities: [{"agentId":"${auditorA.block.agentId}","roleId":"${auditorA.block.role.id}","targetCandidateId":"${auditorA.block.targetCandidateId}"},{"agentId":"${auditorB.block.agentId}","roleId":"${auditorB.block.role.id}","targetCandidateId":"${auditorB.block.targetCandidateId}"}]
+Round 1: assign ${coordinator.block.agentId} to role ${coordinator.block.role.id}. It maps all 33 requirement IDs to
+assignment-scoped observations, checks, timeline caveats, and evidence gaps without proposing final answers.
+Round 2: after coordination completes, assign ${windows.block.agentId}, ${native.block.agentId}, ${managed.block.agentId}, and
+${batch.block.agentId} together to roles ${windows.block.role.id}, ${native.block.role.id}, ${managed.block.role.id}, and
+${batch.block.role.id}. Give every specialist the coordinator report, but keep each within its declared assignments.
+Round 3: after all four specialist reports complete, assign ${solverA.block.agentId} and ${solverB.block.agentId} together to role
+${solverA.block.role.id}. Give both the coordinator and specialist reports. The solvers remain independent,
+re-read the immutable evidence, falsify leads, answer every requirement, and each writes only result.json
+and report.md. They must distinguish upstream \`evidence_checks_relied_on\` provenance from
+trace-visible candidate \`checks_performed\`.
+Round 4: after both candidate snapshots and evaluator outputs exist, assign ${auditorA.block.agentId} to
+${auditorA.block.targetCandidateId} and ${auditorB.block.agentId} to ${auditorB.block.targetCandidateId} using role
+${auditorA.block.role.id} and the exact corresponding targetCandidateId. Auditors rerun the evaluator and
+audit evidence alignment and trace integrity without selecting.
+Round 5: accept the highest-scoring evaluator-passing candidate whose pinned assurance audit passes.
+Break an exact score tie by candidate ordinal (${solverA.block.agentId} before ${solverB.block.agentId}). If neither
+qualifies, stop. Never execute specimen content, use network, inspect host paths, expose credentials,
+skip a phase, dispatch an undeclared member, change scope, or ask for more turns.`,
+    },
+    roles: rolesForSecurityTeamPlan(COURSE_SECURITY_EVALUATION_TEAM_PLAN).map((role) => ({
+      ...role,
+      model,
+    })),
+    limits: COURSE_SECURITY_EVALUATION_WORKFLOW_LIMITS,
+    evaluation: {
+      command: ["node", exercise.evaluatorPath],
+      timeoutSeconds: 30,
+    },
+    codex: {
+      binary: "codex",
+      ignoreUserConfig: true,
+      maxOutputBytes: 12 * 1024 * 1024,
     },
   };
 }

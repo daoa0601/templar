@@ -1,0 +1,142 @@
+{
+  "schema_version": "1",
+  "corpus_id": "aalto-cs-e433001-2025-v1",
+  "title": "Malware Analysis and Reverse Engineering 2025 graded corpus",
+  "requirement_count": 33,
+  "artifacts": [
+    {
+      "artifact_id": "windows-dfir-archive",
+      "assignment_id": "windows-dfir",
+      "role": "specimen_and_instructions",
+      "relative_path": "assignments/2025-01-22_aalto-cs-e433001-windows-dfir-exercise.zip",
+      "media_type": "application/zip",
+      "byte_length": 255881582,
+      "sha256": "e796bd49cf16ca700c478f8eb49fe877c4421fb85524232bebb565658964eb7e"
+    },
+    {
+      "artifact_id": "static-x86-archive",
+      "assignment_id": "static-x86",
+      "role": "specimen_and_instructions",
+      "relative_path": "assignments/static-161ca8b1.zip",
+      "media_type": "application/zip",
+      "byte_length": 6668,
+      "sha256": "4ab17af9297ce81ad92dcd39d672d3c5001df63773027e3cb94ae8f9f618492e"
+    },
+    {
+      "artifact_id": "dynamic-x86-archive",
+      "assignment_id": "dynamic-x86",
+      "role": "specimen_and_instructions",
+      "relative_path": "assignments/homework_x86_dynamic_pw[assignment].zip",
+      "media_type": "application/zip",
+      "byte_length": 24496,
+      "sha256": "f761fd5689bc95d97bad8578f5f885c52a4ee529c585db31116433138b6e234e"
+    },
+    {
+      "artifact_id": "dotnet-analysis-archive",
+      "assignment_id": "dotnet-analysis",
+      "role": "specimen_and_instructions",
+      "relative_path": "assignments/2025.03.12 .NET Analysis Homework.zip",
+      "media_type": "application/zip",
+      "byte_length": 62715,
+      "sha256": "b3a9558caf98c8587a19e414dbf26b64187672c25bb7143db81ca58e2120f68e"
+    },
+    {
+      "artifact_id": "darkwood-batch-archive",
+      "assignment_id": "darkwood-batch",
+      "role": "specimen",
+      "relative_path": "assignments/darkwood.7z",
+      "media_type": "application/x-7z-compressed",
+      "byte_length": 373610328,
+      "sha256": "d5ebb2bf2cbd175558692bfc649e319a1ee059fe3f7c7bcdc765233221e99a98"
+    },
+    {
+      "artifact_id": "darkwood-instructions",
+      "assignment_id": "darkwood-batch",
+      "role": "instructions",
+      "relative_path": "Course Materials-20250617/2025.03.19 Analyzing Samples at Scale.pdf",
+      "media_type": "application/pdf",
+      "byte_length": 4912634,
+      "sha256": "d41f693352ea57d2a377b8426b3ba6abea9aad5f381ade96fde70b7440c5c298"
+    }
+  ],
+  "assignments": [
+    {
+      "assignment_id": "windows-dfir",
+      "title": "Windows DFIR",
+      "analysis_mode": "windows_forensics",
+      "artifact_ids": ["windows-dfir-archive"],
+      "credential_ids": [],
+      "requirement_ids": [
+        "windows-dfir.q01",
+        "windows-dfir.q02",
+        "windows-dfir.q03",
+        "windows-dfir.q04",
+        "windows-dfir.q05",
+        "windows-dfir.q06",
+        "windows-dfir.q07",
+        "windows-dfir.q08",
+        "windows-dfir.q09",
+        "windows-dfir.q10"
+      ]
+    },
+    {
+      "assignment_id": "static-x86",
+      "title": "Static x86 analysis",
+      "analysis_mode": "native_static",
+      "artifact_ids": ["static-x86-archive"],
+      "credential_ids": [],
+      "requirement_ids": [
+        "static-x86.q01",
+        "static-x86.q02",
+        "static-x86.q03",
+        "static-x86.q04",
+        "static-x86.q05",
+        "static-x86.q06",
+        "static-x86.q07",
+        "static-x86.q08",
+        "static-x86.q09"
+      ]
+    },
+    {
+      "assignment_id": "dynamic-x86",
+      "title": "Dynamic x86 analysis",
+      "analysis_mode": "native_dynamic_semantics",
+      "artifact_ids": ["dynamic-x86-archive"],
+      "credential_ids": ["course.archive.dynamic-x86"],
+      "requirement_ids": [
+        "dynamic-x86.q01",
+        "dynamic-x86.q02",
+        "dynamic-x86.q03",
+        "dynamic-x86.q04",
+        "dynamic-x86.q05"
+      ]
+    },
+    {
+      "assignment_id": "dotnet-analysis",
+      "title": ".NET analysis",
+      "analysis_mode": "dotnet_reverse_engineering",
+      "artifact_ids": ["dotnet-analysis-archive"],
+      "credential_ids": ["course.archive.dotnet-inner"],
+      "requirement_ids": [
+        "dotnet-analysis.q01",
+        "dotnet-analysis.q02",
+        "dotnet-analysis.q03",
+        "dotnet-analysis.q04",
+        "dotnet-analysis.q05"
+      ]
+    },
+    {
+      "assignment_id": "darkwood-batch",
+      "title": "Analyzing samples at scale",
+      "analysis_mode": "dotnet_batch",
+      "artifact_ids": ["darkwood-batch-archive", "darkwood-instructions"],
+      "credential_ids": ["course.archive.darkwood"],
+      "requirement_ids": [
+        "darkwood-batch.manual-analysis",
+        "darkwood-batch.automation-plan",
+        "darkwood-batch.implementation",
+        "darkwood-batch.result-set"
+      ]
+    }
+  ]
+}
