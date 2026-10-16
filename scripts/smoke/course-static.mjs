@@ -3,7 +3,6 @@ import { execFile, spawn } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "../../dist/config.js";
 import { decodeExerciseSolveInput } from "../../dist/contracts.js";
@@ -12,10 +11,15 @@ import { TemplarService } from "../../dist/service.js";
 
 const execFileAsync = promisify(execFile);
 const realRun = process.argv.includes("--real");
-const defaultCourseRoot = fileURLToPath(
-  new URL("../../../../cybersec/course-material/", import.meta.url),
-);
-const courseRoot = path.resolve(process.env.TEMPLAR_COURSE_MATERIAL ?? defaultCourseRoot);
+const configuredCourseRoot = process.env.TEMPLAR_COURSE_MATERIAL?.trim();
+if (!configuredCourseRoot) {
+  console.error(
+    "Set TEMPLAR_COURSE_MATERIAL to the private course-material root " +
+      "(the directory containing assignments/static-161ca8b1.zip).",
+  );
+  process.exit(2);
+}
+const courseRoot = path.resolve(configuredCourseRoot);
 const archive = path.join(courseRoot, "assignments", "static-161ca8b1.zip");
 const sampleMember = "static-161ca8b1.bin";
 const instructionsMember = "instructions.txt";

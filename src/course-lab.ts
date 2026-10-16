@@ -5,7 +5,12 @@ import path from "node:path";
 
 import {
   APPLE_NATIVE_ATTESTATION_PROFILE,
+  APPLE_NATIVE_PROVIDER_ID,
   decodeDroneExecutionAttestation,
+  isDroneArtifactId,
+  isDroneAttestationId,
+  isDroneAttestationKeyId,
+  isDroneJobId,
   normalizeDroneMediaType,
 } from "@agentic-orch/drone-client";
 import type {
@@ -41,10 +46,6 @@ export const COURSE_LAB_ANALYZER_ID = "templar_drone_course_lab";
 export const COURSE_LAB_ANALYZER_VERSION = "1.0.0";
 
 const LAB_ID = /^lab_[a-f0-9]{32}$/u;
-const ARTIFACT_ID = /^sha256_[a-f0-9]{64}$/u;
-const JOB_ID = /^job_[a-f0-9]{32}$/u;
-const ATTESTATION_ID = /^attestation\.sha256\.[a-f0-9]{64}$/u;
-const ATTESTATION_KEY_ID = /^ed25519\.sha256\.[a-f0-9]{64}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const SAFE_ID = /^[a-z][a-z0-9_.-]{0,127}$/u;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -161,7 +162,7 @@ function normalizedRationale(value: string): string {
 }
 
 function approvedAttestationId(value: string): string {
-  if (!ATTESTATION_ID.test(value)) {
+  if (!isDroneAttestationId(value)) {
     throw invalidInput("The approved provider attestation ID is invalid.");
   }
   return value;
@@ -265,7 +266,9 @@ function assertProvider(
   approvedId: string,
   now = new Date(),
 ): DroneProviderAttestationSummary {
-  const provider = providers.find((candidate) => candidate.provider_id === "apple_native");
+  const provider = providers.find(
+    (candidate) => candidate.provider_id === APPLE_NATIVE_PROVIDER_ID,
+  );
   if (
     provider === undefined ||
     !provider.installed ||
@@ -298,7 +301,7 @@ function assertOperation(
   if (
     operation === undefined ||
     !operation.enabled ||
-    operation.provider !== "apple_native" ||
+    operation.provider !== APPLE_NATIVE_PROVIDER_ID ||
     operation.network !== "none" ||
     inputs.length !== 2 ||
     outputs.length !== 1 ||
@@ -451,10 +454,10 @@ function decodeApproval(
       "expires_at",
     ]) ||
     typeof provider.attestation_id !== "string" ||
-    !ATTESTATION_ID.test(provider.attestation_id) ||
+    !isDroneAttestationId(provider.attestation_id) ||
     provider.profile !== APPLE_NATIVE_ATTESTATION_PROFILE ||
     typeof provider.key_id !== "string" ||
-    !ATTESTATION_KEY_ID.test(provider.key_id) ||
+    !isDroneAttestationKeyId(provider.key_id) ||
     typeof provider.issuer !== "string" ||
     provider.issuer.length === 0 ||
     provider.issuer.length > 128 ||
@@ -494,15 +497,15 @@ function decodeSubmission(
     value.schema_version !== "1" ||
     value.lab_id !== expectedLabId ||
     typeof value.job_id !== "string" ||
-    !JOB_ID.test(value.job_id) ||
+    !isDroneJobId(value.job_id) ||
     typeof value.operation_id !== "string" ||
     !SAFE_ID.test(value.operation_id) ||
     typeof value.provider_attestation_id !== "string" ||
-    !ATTESTATION_ID.test(value.provider_attestation_id) ||
+    !isDroneAttestationId(value.provider_attestation_id) ||
     typeof value.specimen_artifact_id !== "string" ||
-    !ARTIFACT_ID.test(value.specimen_artifact_id) ||
+    !isDroneArtifactId(value.specimen_artifact_id) ||
     typeof value.context_artifact_id !== "string" ||
-    !ARTIFACT_ID.test(value.context_artifact_id) ||
+    !isDroneArtifactId(value.context_artifact_id) ||
     !canonicalTimestamp(value.submitted_at)
   ) {
     throw new Error("Stored course-lab submission is malformed.");
@@ -530,13 +533,13 @@ function decodeCollection(
     typeof value.assignment_id !== "string" ||
     !SAFE_ID.test(value.assignment_id) ||
     typeof value.evidence_artifact_id !== "string" ||
-    !ARTIFACT_ID.test(value.evidence_artifact_id) ||
+    !isDroneArtifactId(value.evidence_artifact_id) ||
     typeof value.evidence_sha256 !== "string" ||
     !SHA256.test(value.evidence_sha256) ||
     typeof value.execution_attestation_artifact_id !== "string" ||
-    !ARTIFACT_ID.test(value.execution_attestation_artifact_id) ||
+    !isDroneArtifactId(value.execution_attestation_artifact_id) ||
     typeof value.provider_attestation_id !== "string" ||
-    !ATTESTATION_ID.test(value.provider_attestation_id) ||
+    !isDroneAttestationId(value.provider_attestation_id) ||
     !canonicalTimestamp(value.collected_at)
   ) {
     throw new Error("Stored course-lab collection is malformed.");
@@ -658,7 +661,7 @@ export class CourseLabController {
       },
     });
     if (
-      job.provider_id !== "apple_native" ||
+      job.provider_id !== APPLE_NATIVE_PROVIDER_ID ||
       job.provider_attestation_id !== approvedId ||
       job.operation_id !== operation.operation_id
     ) {
@@ -711,7 +714,7 @@ export class CourseLabController {
     const job = await this.#drone.job(submission.job_id);
     if (
       job.operation_id !== submission.operation_id ||
-      job.provider_id !== "apple_native" ||
+      job.provider_id !== APPLE_NATIVE_PROVIDER_ID ||
       job.provider_attestation_id !== submission.provider_attestation_id ||
       job.provider_attestation_id !== approval.provider_attestation.attestation_id ||
       job.inputs.specimen !== submission.specimen_artifact_id ||

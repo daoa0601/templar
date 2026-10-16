@@ -24,6 +24,14 @@ import type {
   AgentRuntime,
   WorkflowDefinition,
 } from "@agentic-orch/agent-blocks/templates/scoped-worktree";
+import {
+  APPLE_NATIVE_ATTESTATION_PROFILE,
+  APPLE_NATIVE_PROVIDER_ID,
+  isDroneArtifactId,
+  isDroneAttestationId,
+  isDroneJobId,
+  isDroneOperationId,
+} from "@agentic-orch/drone-client";
 import { Effect, Fiber } from "effect";
 import type { Fiber as EffectFiber } from "effect/Fiber";
 
@@ -448,13 +456,15 @@ export class TemplarService {
       this.#drone.providers(),
       this.#drone.operations(),
     ]);
-    const provider = providers.find((candidate) => candidate.provider_id === "apple_native");
+    const provider = providers.find(
+      (candidate) => candidate.provider_id === APPLE_NATIVE_PROVIDER_ID,
+    );
     if (
       provider === undefined ||
       !provider.mutations_available ||
       !provider.attested ||
       provider.attestation === undefined ||
-      provider.attestation.profile !== "apple_native_no_network_vm_v1" ||
+      provider.attestation.profile !== APPLE_NATIVE_ATTESTATION_PROFILE ||
       new Date(provider.attestation.expires_at).valueOf() <= Date.now()
     ) {
       throw new TemplarError({
@@ -885,13 +895,13 @@ export class TemplarService {
         parsed.run_id !== runId ||
         JSON.stringify(keys) !== JSON.stringify(expected) ||
         typeof parsed.operation_id !== "string" ||
-        !/^[a-z][a-z0-9_.-]{0,127}$/u.test(parsed.operation_id) ||
+        !isDroneOperationId(parsed.operation_id) ||
         typeof parsed.source_artifact_id !== "string" ||
-        !/^sha256_[a-f0-9]{64}$/u.test(parsed.source_artifact_id) ||
+        !isDroneArtifactId(parsed.source_artifact_id) ||
         typeof parsed.provider_attestation_id !== "string" ||
-        !/^attestation\.sha256\.[a-f0-9]{64}$/u.test(parsed.provider_attestation_id) ||
+        !isDroneAttestationId(parsed.provider_attestation_id) ||
         typeof parsed.job_id !== "string" ||
-        !/^job_[a-f0-9]{32}$/u.test(parsed.job_id) ||
+        !isDroneJobId(parsed.job_id) ||
         typeof parsed.requested_at !== "string" ||
         !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(parsed.requested_at) ||
         typeof parsed.rationale !== "string"
