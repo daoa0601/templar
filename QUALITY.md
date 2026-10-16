@@ -1,6 +1,8 @@
 # Templar quality gates
 
-This repository uses pnpm 11.13.1 exclusively. The exact version is pinned in `package.json`; installs made with npm, Yarn, Bun, or a different pnpm version fail at the repository boundary.
+This repository uses pnpm 11.13.1 exclusively. pnpm enforces it natively through `packageManager`
+and `engines.pnpm` in `package.json` plus `engineStrict` and `pmOnFail: error` in
+`pnpm-workspace.yaml`; npm cannot resolve the `workspace:*` dependencies.
 
 ## Setup
 
@@ -11,23 +13,15 @@ pnpm hooks:install
 ```
 
 Use a supported Node.js release from `package.json`. A verified CI or clean-room run must use
-`pnpm install --frozen-lockfile`; with the current lock, that command also requires every sibling
-listed below.
+`pnpm install --frozen-lockfile`.
 
 ## Shared TypeScript policy
 
-Templar consumes the `workspace:*` `@agentic-orch/ts-quality` development package for the repository secret
-scan, package-manifest validation, managed Git-hook templates, strict Node.js TypeScript baseline,
-and Prettier defaults. The repository-level commands below remain stable; their shared mechanics
-delegate to `ts-quality` so fixes land once and are inherited on the next reviewed package update.
-
-The small `scripts/quality/require-pnpm.mjs` preinstall guard remains local by design: an external
-development dependency is not available yet when a clean install enters `preinstall`. Coverage
-floors, smoke suites, build behavior, and dependency policy remain owned by Templar.
-
-The expanded GitHub Actions jobs remain checked in because a relative reusable workflow cannot cross
-these independent Git repository boundaries. Templar-specific dependency setup, coverage, and
-integration jobs remain local.
+Templar uses the sibling `@agentic-orch/ts-quality` development module for the repository secret
+scan, managed Git-hook templates, strict Node.js TypeScript baseline, and Prettier defaults. The
+repository-level commands below remain stable; their shared mechanics delegate to `ts-quality` so
+fixes land once. Coverage floors, smoke suites, build behavior, and dependency policy remain owned
+by Templar.
 
 ## Gate ladder
 
@@ -35,9 +29,9 @@ integration jobs remain local.
 | ---------------------- | --------------------------------------------------------------------------------------------------------- |
 | `pnpm quality:quick`   | Prettier check, warning-free Oxlint, strict TypeScript, and repository secret scan.                       |
 | `pnpm check`           | Quick gate plus the deterministic unit/integration test suite.                                            |
-| `pnpm quality:offline` | Quick gate, coverage thresholds, production build, and dry-run package manifest inspection.               |
+| `pnpm quality:offline` | Quick gate, coverage thresholds, and production build.                                                    |
 | `pnpm deps:check`      | Production advisory audit at high severity and registry-signature verification. Requires registry access. |
-| `pnpm preflight`       | Complete offline and online gate; this is the handoff/release command.                                    |
+| `pnpm preflight`       | Complete offline and online gate; this is the handoff command.                                            |
 
 Coverage is measured over all `src/**/*.ts` files, including currently untested entrypoints. The enforced global floor is 75% statements, 68% branches, 82% functions, and 78% lines. Raising a floor is welcome; lowering one requires an explicit rationale.
 
@@ -61,22 +55,13 @@ directory:
 The hooks are a fast local feedback layer, not the source of truth. Automation should repeat the
 frozen install and `pnpm preflight`.
 
-## Local sibling-lock and CI status
+## Siblings
 
-The manifest contains `workspace:*` dependencies and the current lock resolves four sibling modules:
-
-| Sibling                         | Current role                                                      |
-| ------------------------------- | ----------------------------------------------------------------- |
-| `@agentic-orch/agent-blocks`    | Runtime orchestration and public control-plane contracts.         |
-| `@agentic-orch/drone-client`    | Public Drone v1 contracts and hardened bounded HTTP client.       |
-| `@agentic-orch/node-guardrails` | Neutral bounded HTTP and verified content-addressed byte storage. |
-| `@agentic-orch/ts-quality`      | Development-only repository checks and shared configuration.      |
-
-Every `pnpm install --frozen-lockfile` therefore requires all four checkouts at the relative paths
-in `pnpm-workspace.yaml`. The checked-in workflow recreates that layout at audited full commit SHAs,
-builds Node Guardrails before Agent Blocks, builds the remaining runtime modules, and then runs
-Templar's frozen install and gates. Local validation uses the same sibling layout. Source repository
-visibility does not imply npm publication.
+`agent-blocks`, `drone-client`, `node-guardrails`, and `ts-quality` must be checked out next to this
+repository; see the catalog README for the layout. The lock resolves them as `link:` entries, so a
+missing sibling fails the frozen install instead of falling back to a registry. The GitHub workflow
+checks them out at their default branch, and `pnpm install` builds `node-guardrails`,
+`agent-blocks`, and `drone-client` through their `prepare` scripts, in dependency order.
 
 ## Dependency and supply-chain policy
 

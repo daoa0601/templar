@@ -47,9 +47,8 @@ codex login status
 - Node.js 22.22.2+, 24.15.0+, or 26+
 - Git
 - pnpm 11.13.1
-- A built sibling checkout at `../agent-blocks` for the current frozen install
-- Sibling checkouts at `../drone-client`, `../node-guardrails`, and `../ts-quality` for the current
-  frozen install
+- `agent-blocks`, `drone-client`, `node-guardrails`, and `ts-quality` checked out next to this
+  repository (see the catalog README for the sibling layout)
 - A locally authenticated `codex` CLI for real agent runs
 - Optionally, a locally authenticated `opencode` CLI for an alternate provider runtime
 
@@ -60,27 +59,12 @@ pnpm check
 pnpm build
 ```
 
-The package manifest uses explicit local workspace dependencies:
-
-```json
-{
-  "dependencies": {
-    "@agentic-orch/agent-blocks": "workspace:*",
-    "@agentic-orch/drone-client": "workspace:*",
-    "@agentic-orch/node-guardrails": "workspace:*"
-  },
-  "devDependencies": {
-    "@agentic-orch/ts-quality": "workspace:*"
-  }
-}
-```
-
-Templar consumes the public Drone v1 contracts and bounded HTTP client from
-`@agentic-orch/drone-client`, plus neutral bounded HTTP and content-addressed storage primitives from
-`@agentic-orch/node-guardrails/http` and `/cas`. The lock resolves all four modules as sibling
-`link:` entries, so every frozen install requires the four directories listed above and cannot
-silently download similarly named registry packages. Templar retains PCAP/source/exercise
-validation, authorization, workflow semantics, and application error mapping.
+The lock resolves those siblings as `workspace:*` `link:` entries, so a missing sibling fails the
+frozen install instead of falling back to a registry. `pnpm install` builds `node-guardrails`,
+`agent-blocks`, and `drone-client` through their `prepare` scripts. Templar uses the Drone v1 client
+and contract constants from `@agentic-orch/drone-client` and bounded HTTP and content-addressed
+storage from `@agentic-orch/node-guardrails/http` and `/cas`; PCAP/source/exercise validation,
+authorization, workflow semantics, and application error mapping stay in Templar.
 
 Effect is pinned to `4.0.0-beta.98`. Upgrade it intentionally and rerun the complete checks.
 
@@ -116,11 +100,12 @@ pnpm smoke:ctu13:harness
 
 # Build the static course snapshot and exercise the complete three-round workflow locally.
 # The executable is streamed from its archive into objdump and is never placed in an agent workspace.
-pnpm smoke:course-static
+# TEMPLAR_COURSE_MATERIAL must name the private course-material root; the smoke exits otherwise.
+TEMPLAR_COURSE_MATERIAL=/path/to/course-material pnpm smoke:course-static
 
 # Run the same exercise with real agents through the authenticated Codex CLI.
 # This consumes ChatGPT subscription usage.
-pnpm smoke:course-static:real
+TEMPLAR_COURSE_MATERIAL=/path/to/course-material pnpm smoke:course-static:real
 
 # Inspect, compose, solve, and privately grade the complete course corpus.
 # See docs/course-evaluation.md for the evidence and security requirements.
@@ -144,29 +129,29 @@ invokes Codex.
 
 Configuration:
 
-| Variable                                       |                 Default | Meaning                                                      |
-| ---------------------------------------------- | ----------------------: | ------------------------------------------------------------ |
-| `TEMPLAR_HOST`                                 |             `127.0.0.1` | HTTP bind host. Non-loopback requires a token.               |
-| `TEMPLAR_PORT`                                 |                  `8080` | HTTP port.                                                   |
-| `TEMPLAR_HOME`                                 |            `~/.templar` | Incident, artifact, acknowledgment, and harness state root.  |
-| `TEMPLAR_BEARER_TOKEN`                         |                   unset | Optional in loopback development; required otherwise.        |
-| `TEMPLAR_MAX_ACTIVE_RUNS`                      |                     `2` | Process-local active-run admission cap.                      |
-| `TEMPLAR_MAX_JSON_BYTES`                       |                 `65536` | JSON request-body cap.                                       |
-| `TEMPLAR_MAX_PCAP_BYTES`                       |               `8388608` | PCAP upload and analysis byte cap.                           |
-| `TEMPLAR_MAX_PCAP_PACKETS`                     |                 `50000` | Packet parsing cap.                                          |
-| `TEMPLAR_MAX_EXERCISE_SNAPSHOT_BYTES`          |                `524288` | Decoded exercise snapshot cap.                               |
-| `TEMPLAR_MAX_COURSE_LAB_SPECIMEN_BYTES`        |             `268435456` | Operator-only course-lab specimen cap.                       |
-| `TEMPLAR_MAX_SOURCE_SNAPSHOT_BYTES`            |               `8388608` | Canonical source snapshot cap.                               |
-| `TEMPLAR_DRONE_ENABLED`                        |                  `true` | Enables sandbox capability discovery through Drone.          |
-| `TEMPLAR_DRONE_URL`                            | `http://127.0.0.1:8090` | Drone service endpoint; plain HTTP is accepted only locally. |
-| `TEMPLAR_DRONE_TOKEN`                          |                   unset | Optional bearer token for Drone.                             |
-| `TEMPLAR_DRONE_TIMEOUT_MS`                     |                  `1000` | Bound for Drone control-plane requests.                      |
-| `TEMPLAR_DRONE_SOURCE_VALIDATION_OPERATION_ID` |                   unset | Registered operation used for accepted-fix replay.           |
-| `TEMPLAR_DRONE_COURSE_LAB_OPERATION_ID`        |                   unset | Registered attested course-analysis operation.               |
-| `TEMPLAR_COURSE_MATERIAL`                      |                   unset | Optional private course root for inventory/compose.          |
-| `TEMPLAR_COURSE_RUNTIME`                       |                 `codex` | Course CLI runtime: `codex` or `opencode`.                   |
-| `TEMPLAR_COURSE_MODEL`                         |         runtime default | Operator-selected course model; never caller-controlled.     |
-| `TEMPLAR_OPENCODE_BINARY`                      |              `opencode` | Trusted local OpenCode executable for course CLI runs.       |
+| Variable                                       |                 Default | Meaning                                                                |
+| ---------------------------------------------- | ----------------------: | ---------------------------------------------------------------------- |
+| `TEMPLAR_HOST`                                 |             `127.0.0.1` | HTTP bind host. Non-loopback requires a token.                         |
+| `TEMPLAR_PORT`                                 |                  `8080` | HTTP port.                                                             |
+| `TEMPLAR_HOME`                                 |            `~/.templar` | Incident, artifact, acknowledgment, and harness state root.            |
+| `TEMPLAR_BEARER_TOKEN`                         |                   unset | Optional in loopback development; required otherwise.                  |
+| `TEMPLAR_MAX_ACTIVE_RUNS`                      |                     `2` | Process-local active-run admission cap.                                |
+| `TEMPLAR_MAX_JSON_BYTES`                       |                 `65536` | JSON request-body cap.                                                 |
+| `TEMPLAR_MAX_PCAP_BYTES`                       |               `8388608` | PCAP upload and analysis byte cap.                                     |
+| `TEMPLAR_MAX_PCAP_PACKETS`                     |                 `50000` | Packet parsing cap.                                                    |
+| `TEMPLAR_MAX_EXERCISE_SNAPSHOT_BYTES`          |                `524288` | Decoded exercise snapshot cap.                                         |
+| `TEMPLAR_MAX_COURSE_LAB_SPECIMEN_BYTES`        |             `268435456` | Operator-only course-lab specimen cap.                                 |
+| `TEMPLAR_MAX_SOURCE_SNAPSHOT_BYTES`            |               `8388608` | Canonical source snapshot cap.                                         |
+| `TEMPLAR_DRONE_ENABLED`                        |                  `true` | Enables sandbox capability discovery through Drone.                    |
+| `TEMPLAR_DRONE_URL`                            | `http://127.0.0.1:8090` | Drone service endpoint; plain HTTP is accepted only locally.           |
+| `TEMPLAR_DRONE_TOKEN`                          |                   unset | Optional bearer token for Drone.                                       |
+| `TEMPLAR_DRONE_TIMEOUT_MS`                     |                  `1000` | Bound for Drone control-plane requests.                                |
+| `TEMPLAR_DRONE_SOURCE_VALIDATION_OPERATION_ID` |                   unset | Registered operation used for accepted-fix replay.                     |
+| `TEMPLAR_DRONE_COURSE_LAB_OPERATION_ID`        |                   unset | Registered attested course-analysis operation.                         |
+| `TEMPLAR_COURSE_MATERIAL`                      |                   unset | Private course root for inventory/compose and the course-static smoke. |
+| `TEMPLAR_COURSE_RUNTIME`                       |                 `codex` | Course CLI runtime: `codex` or `opencode`.                             |
+| `TEMPLAR_COURSE_MODEL`                         |         runtime default | Operator-selected course model; never caller-controlled.               |
+| `TEMPLAR_OPENCODE_BINARY`                      |              `opencode` | Trusted local OpenCode executable for course CLI runs.                 |
 
 Callers cannot choose a workspace, evaluator command, Codex setting, executable, budget, URL, or host
 path through incident input.
@@ -353,15 +338,12 @@ active testing, and `RE_STATIC` does not grant `RE_DYNAMIC_LAB`.
 
 ## Disposable lab backend
 
-Templar delegates sandbox ownership to the sibling `drone` service. `GET /api/labs` reports Drone's
-provider capabilities and returns a fail-closed unavailable record when Drone is disabled or cannot
-be reached. Public wire types, v1 invariants, runtime response validation, URL policy,
-authentication, and bounded response handling come from `@agentic-orch/drone-client`. The client enforces a
-hard deadline even if the transport ignores abort, requests identity encoding, rejects compression
-and redirects, cancels rejected bodies, and reconciles `Content-Length` when present. It correlates
-artifact/job identities and submitted operation inputs, and verifies downloaded bytes against their
-requested SHA-256 artifact ID. Templar keeps only its application-specific error mapping and
-fail-closed unavailable status. Templar no longer constructs or executes Parallels commands.
+Templar delegates sandbox ownership to the sibling Drone service and talks to it only through
+`@agentic-orch/drone-client`; see the [Drone README](../drone/README.md) for the sandbox and
+attestation model and the [Drone Client README](../drone-client/README.md) for client behavior.
+`GET /api/labs` reports Drone's provider capabilities and returns a fail-closed unavailable record
+when Drone is disabled or cannot be reached. Templar keeps only its application-specific error
+mapping and fail-closed unavailable status, and never chooses sandbox images, commands, or mounts.
 
 Accepted source fixes have one narrow dynamic seam. It is disabled until
 `TEMPLAR_DRONE_SOURCE_VALIDATION_OPERATION_ID` names an enabled Drone operation whose public contract
@@ -370,13 +352,8 @@ requires a `source` input with media type `application/vnd.templar.source-tree+j
 evaluator and pinned audit, receive a promotion acknowledgment, and then receive a separate replay
 rationale. Templar stages the accepted tree by content hash and submits only the registered operation
 ID plus artifact ID; candidates cannot supply commands, images, environment, resources, or network
-settings.
-
-Drone's Apple-native provider runs Linux operations in one lightweight VM per job with no network
-interface, read-only OCI roots, bounded writable storage, and fixed-size ext4 artifact exchange.
-Drone reports a signed provider measurement and preserves a per-job execution statement. Templar
-records the exact provider attestation on accepted source replays and rejects a later job whose
-attestation or content-addressed inputs no longer match that immutable request.
+settings. Templar records the exact provider attestation on accepted source replays and rejects a
+later job whose attestation or content-addressed inputs no longer match that immutable request.
 
 The whole-course workflow has a separate operator-only specimen seam. It is disabled until
 `TEMPLAR_DRONE_COURSE_LAB_OPERATION_ID` names one enabled no-network Apple operation with exactly two
@@ -388,15 +365,14 @@ assignment evidence only after validating its content-addressed execution-attest
 See [the course evaluation guide](docs/course-evaluation.md) for the commands and media types.
 
 Codex and OpenCode model inference remains in the trusted host control plane. The model credential is
-never copied into the specimen VM, and the fixed no-NIC VM cannot call OpenAI, Z.AI, or an AI gateway.
-The safe split is: preapproved tools analyze the specimen in the disposable VM; Templar validates and
-composes their passive evidence; then GPT-5.6 Sol or GLM-5.2 works only against that immutable
-snapshot. Putting an authenticated agent CLI inside this VM would require a different, explicitly
-egress-enabled provider profile and is not implied by the course-lab approval.
+never copied into the specimen VM, and the no-network operation cannot call OpenAI, Z.AI, or an AI
+gateway. The safe split is: preapproved tools analyze the specimen in the disposable VM; Templar
+validates and composes their passive evidence; then GPT-5.6 Sol or GLM-5.2 works only against that
+immutable snapshot. Putting an authenticated agent CLI inside the VM would require a different,
+explicitly egress-enabled Drone operation and is not implied by the course-lab approval.
 
-Parallels can later be added inside Drone as a Windows-only provider without changing Templar's
-workflow boundary. Other dynamic workflows remain `requires_lab` until they gain the same
-declared-operation and approval integration.
+Other dynamic workflows remain `requires_lab` until they gain the same declared-operation and
+approval integration.
 
 ## Security team composition
 
@@ -518,12 +494,12 @@ contain operationally sensitive data. Local content hashes provide identity, not
 pnpm check      # format, oxlint, typecheck, secret scan, and Vitest
 pnpm build      # production TypeScript emit
 pnpm demo       # complete fake-runtime harness run; no billing
-pnpm preflight  # coverage, package, and dependency gates
+pnpm preflight  # coverage, build, and dependency gates
 git diff --check
 git status --short
 ```
 
-See [QUALITY.md](QUALITY.md) for the pinned pnpm, coverage, dependency, package, secret, and local-hook
+See [QUALITY.md](QUALITY.md) for the pinned pnpm, coverage, dependency, secret, and local-hook
 gates.
 
 Tests generate tiny classic-PCAP, exercise, and source fixtures in code. They cover strict schemas;
